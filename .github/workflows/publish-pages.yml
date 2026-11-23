@@ -20,8 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          # The source snapshot for the public PR #2 preview.
-          ref: e264568f773fa8aebc6f9dcacbfdd80b2654ebdc
+          # Publish the combined preview until the main workflow is merged.
+          ref: a043a78916cf1ee5a66857e0601a2e53242ce8f1
           persist-credentials: false
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
