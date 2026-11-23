@@ -152,7 +152,15 @@ $("app").innerHTML =
 <main><div class="page-head"><div><h1 id="page-title">稳态运行分析</h1><div class="project-meta">${icon("motor", 14)}<span id="project-name"></span><i></i><span id="model-meta"></span></div></div><div class="details-action"><label class="head-model">${icon("model", 14)}<select aria-label="模型" id="model-choice"><option value="engineering">常参数工程模型</option><option value="ideal">理想模型</option><option value="map">磁链图模型</option></select></label><button class="small-btn hide-side" data-action="sidebar" aria-expanded="false" aria-controls="side">${icon("sliders")}参数</button><div class="popup-wrap"><button class="btn primary" data-action="export-menu" aria-haspopup="true" aria-expanded="false" id="export-btn">${icon("export")}导出结果${icon("down", 12)}</button><div id="export-menu" class="menu" hidden><button data-action="csv">导出结果 CSV</button><button data-action="png">导出双图 PNG</button></div></div></div></div>
 <section class="card batch-panel" id="batch-panel" hidden><div class="section-head"><span class="icon-tile">${icon("batch")}</span><h2>工况序列</h2><div class="batch-actions"><button class="small-btn" data-action="batch-import">${icon("folder", 14)}导入 CSV</button><button class="small-btn" data-action="sample">载入示例</button>${iconButton("prev", "上一工况", "prev")}${iconButton("play", "播放或暂停", "play")}${iconButton("next", "下一工况", "next")}</div></div><div id="batch-list"></div></section>
 <section class="metrics" aria-label="运行指标">${metric("torque", "电磁转矩", "torque", "#147f72", "N·m")}${metric("current", "电流幅值", "wave", "#3472b9", "A")}${metric("voltage", "电压幅值", "bolt", "#ba843b", "V")}${metric("speed", "机械转速", "speed", "#8371a6", "rpm")}</section>
-<section class="card tn-card" id="tn-card" style="--tn-left:${speedAxis.left}px;--tn-right:${speedAxis.right}px"><div class="card-head"><span class="icon-tile blue">${icon("analysis")}</span><h2>转矩–转速</h2><div class="tn-controls" id="tn-controls"></div></div><canvas class="tn-plot" id="tn" aria-label="转矩和机械转速包络图"></canvas><div class="tn-slider"><input id="s-rpm" type="range" aria-label="机械转速滑块" step="any"></div><div class="legend tn-legend"><span><i style="--color:${envelopeColor}"></i>转矩包络</span><span><i class="tn-marker"></i>运行点</span><span id="tn-status" role="status"></span></div></section>
+<section class="card tn-card" id="tn-card" style="--tn-left:${speedAxis.left}px;--tn-right:${speedAxis.right}px">
+  <div class="card-head"><span class="icon-tile blue">${icon("analysis")}</span><h2>转矩–转速</h2>
+    <label class="check tn-toggle"><input id="tn-negative" type="checkbox" aria-controls="tn">显示负转矩</label>
+    <div class="tn-controls" id="tn-controls"></div>
+  </div>
+  <canvas class="tn-plot" id="tn" aria-label="非负转矩与转速包络图"></canvas>
+  <div class="tn-slider"><input id="s-rpm" type="range" aria-label="机械转速滑块" step="any"></div>
+  <div class="legend tn-legend"><span><i style="--color:${envelopeColor}"></i>转矩包络</span><span id="tn-point-key"><i class="tn-marker"></i>运行点</span><span id="tn-hidden-point" hidden>当前运行点为负转矩</span><span id="tn-status" role="status"></span></div>
+</section>
 <div class="plots">${card("current", "电流平面约束分析", "grid", "")}${card("voltage", "电压平面矢量图", "vector", "blue")}</div>
 <section class="card detail-card"><div class="section-head"><span class="icon-tile">${icon("table")}</span><h2>运行点明细</h2><button class="cmp-toggle" data-action="compare" id="compare-btn">求解器对照 ${icon("right", 12)}</button><span class="status" id="status">计算中</span></div><div class="detail-body"><div class="values"><table class="data-table"><thead><tr><th>物理量</th><th>d 轴</th><th>q 轴</th><th>单位</th></tr></thead><tbody id="values"></tbody></table></div><div class="margins"><h3>约束裕量</h3><div id="margins"></div></div></div><div class="error-text" id="state-note" hidden></div></section>
 </main></div><footer class="bottom"><span class="live" id="live">实时求解</span><span id="method"></span><span>dq 同步坐标系</span><span class="push">幅值约定 · 相峰值</span><span>FluxLab 1.0</span></footer>
@@ -284,11 +292,11 @@ const flag = (k: "useR" | "useTemp" | "useK" | "direct", s: string) =>
   s +
   "</label>";
 $("tn-controls").innerHTML =
-  '<label for="n-rpm">机械转速</label>' +
+  '<div class="tn-field"><label for="n-rpm">机械转速</label>' +
   num("rpm") +
-  '<label for="n-speed-span">横轴范围</label><div class="number"><span>±</span><input id="n-speed-span" type="number" min="1" max="' +
+  '</div><div class="tn-field"><label for="n-speed-span">横轴范围</label><div class="number"><span>±</span><input id="n-speed-span" type="number" min="1" max="' +
   bounds.rpm[1] +
-  '" step="any" placeholder="自动" title="清空恢复自动范围"><span>rpm</span></div>';
+  '" step="any" placeholder="自动" title="清空恢复自动范围"><span>rpm</span></div></div>';
 const groups = new Set(["oper", "motor", "constraint", "model"]);
 const section = (key: string, title: string, ic: string, html: string) =>
   '<details data-group="' +
@@ -410,7 +418,14 @@ function drawTN() {
   const invalidRow = tab === "batch" && rowIndex >= 0 && !rows[rowIndex]?.op;
   const torque =
     !invalidRow && frame?.o.rpm === o.rpm ? frame.r.point?.torque : undefined;
-  drawSpeedChart($("tn"), tnSpan, o.rpm, torque, tnEnvelope);
+  const showNegative = $<HTMLInputElement>("tn-negative").checked;
+  const hiddenPoint = !showNegative && (torque ?? 0) < 0;
+  const pointKey = $("tn-point-key");
+  if (pointKey.hidden !== hiddenPoint) {
+    pointKey.hidden = hiddenPoint;
+    $("tn-hidden-point").hidden = !hiddenPoint;
+  }
+  drawSpeedChart($("tn"), tnSpan, o.rpm, torque, tnEnvelope, showNegative);
 }
 function syncSpeed() {
   const modelChanged = tnParameters !== p;
@@ -688,6 +703,15 @@ function setNumber(key: Key, value: number) {
   return true;
 }
 new ResizeObserver(drawTN).observe($("tn"));
+$("tn-negative").addEventListener("change", (e) => {
+  const { checked } = e.target as HTMLInputElement;
+  $("tn-card").classList.toggle("tn-full", checked);
+  $("tn").setAttribute(
+    "aria-label",
+    checked ? "正负转矩与转速包络图" : "非负转矩与转速包络图",
+  );
+  drawTN();
+});
 $("s-rpm").addEventListener("input", (e) => {
   dragging = true;
   const input = e.target as HTMLInputElement;
@@ -1353,7 +1377,7 @@ async function action(a: string) {
     case "help":
       modal(
         "坐标约定与模型说明",
-        "<h3>输入与运行点</h3><p>转速为有符号机械转速。电流、电压均为相基波峰值。自动求点可按给定电磁转矩寻找最小电流。勾选「最大出力转矩」时，按当前转速和约束实时求最大出力，并显示电磁转矩乘机械角速度得到的机械转换功率。手动验点直接计算指定电流。P 表示选中的运行点或标明的边界点。</p><h3>稳态 dq 方程</h3><p>ω<sub>e</sub> = 2πpn / 60<br>V<sub>d</sub> = R<sub>s</sub>i<sub>d</sub> − ω<sub>e</sub>ψ<sub>q</sub>　　V<sub>q</sub> = R<sub>s</sub>i<sub>q</sub> + ω<sub>e</sub>ψ<sub>d</sub><br>T<sub>e</sub> = 1.5p (ψ<sub>d</sub>i<sub>q</sub> − ψ<sub>q</sub>i<sub>d</sub>)</p><h3>模型与约束</h3><p>默认使用常参数工程模型，并计入定子电阻。可关闭定子电阻或切换到理想模型进行对照。工程模型可按绕组温度修正铜阻，铜温度系数取 0.00393 / °C。磁链图以双线性插值计算总磁链。线性调制的相电压峰值上限，SVPWM 为 V<sub>dc</sub> / √3，SPWM 为 V<sub>dc</sub> / 2。常参数工程模型与磁链图模型可再乘以电压利用率 k<sub>v</sub>。直接给定电压上限时，求解使用输入的电压值。紫色六边形表示理想两电平逆变器可合成的平均电压范围，顶点幅值为 2V<sub>dc</sub> / 3。图中取转子电角度 0°，第一个顶点沿正 d 轴。橙色圆表示求解采用的电压限值。</p><h3>读图</h3><p>转矩–转速图显示当前电流与电压约束下的转矩包络。横轴默认随模型求得的可达转速边界调整，图下滑块与横轴同尺度。未找到有限边界时，横轴保留观察范围。可清空横轴范围输入框恢复自动估算。输入更高转速时横轴自动涵盖当前点。电流图的着色区域同时满足电流与电压约束。MTPA 是单位电流最大转矩轨迹。电压图将各项首尾相接，蓝色矢量是从原点指向合成端点的端电压。常参数模型依次连接永磁反电动势、电感电压和电阻压降。前两项的终点是旋转磁链电压。电感电压 V<sub>L</sub> 的 (d, q) 分量为 (−ω<sub>e</sub>L<sub>q</sub>i<sub>q</sub>, ω<sub>e</sub>L<sub>d</sub>i<sub>d</sub>)。磁链图模型使用当前工况的总磁链，显示 −ω<sub>e</sub>ψ<sub>q</sub> 在 d 轴上的分量和 ω<sub>e</sub>ψ<sub>d</sub> 在 q 轴上的分量。零值分量可在明细中查看。裕量等于极限减去实际幅值。</p><h3>工况回放</h3><p>导入 CSV 后点击表格行或播放。分析、回放和导出复用同一模型。示例电机与磁链数据用于方法验证。</p>",
+        "<h3>输入与运行点</h3><p>转速为有符号机械转速。电流、电压均为相基波峰值。自动求点可按给定电磁转矩寻找最小电流。勾选「最大出力转矩」时，按当前转速和约束实时求最大出力，并显示电磁转矩乘机械角速度得到的机械转换功率。手动验点直接计算指定电流。P 表示选中的运行点或标明的边界点。</p><h3>稳态 dq 方程</h3><p>ω<sub>e</sub> = 2πpn / 60<br>V<sub>d</sub> = R<sub>s</sub>i<sub>d</sub> − ω<sub>e</sub>ψ<sub>q</sub>　　V<sub>q</sub> = R<sub>s</sub>i<sub>q</sub> + ω<sub>e</sub>ψ<sub>d</sub><br>T<sub>e</sub> = 1.5p (ψ<sub>d</sub>i<sub>q</sub> − ψ<sub>q</sub>i<sub>d</sub>)</p><h3>模型与约束</h3><p>默认使用常参数工程模型，并计入定子电阻。可关闭定子电阻或切换到理想模型进行对照。工程模型可按绕组温度修正铜阻，铜温度系数取 0.00393 / °C。磁链图以双线性插值计算总磁链。线性调制的相电压峰值上限，SVPWM 为 V<sub>dc</sub> / √3，SPWM 为 V<sub>dc</sub> / 2。常参数工程模型与磁链图模型可再乘以电压利用率 k<sub>v</sub>。直接给定电压上限时，求解使用输入的电压值。紫色六边形表示理想两电平逆变器可合成的平均电压范围，顶点幅值为 2V<sub>dc</sub> / 3。图中取转子电角度 0°，第一个顶点沿正 d 轴。橙色圆表示求解采用的电压限值。</p><h3>读图</h3><p>转矩–转速图默认显示零及正转矩，勾选「显示负转矩」即可查看完整包络。横轴默认随模型求得的可达转速边界调整，图下滑块与横轴同尺度。未找到有限边界时，横轴保留观察范围。可清空横轴范围输入框恢复自动估算。输入更高转速时横轴自动涵盖当前点。电流图的着色区域同时满足电流与电压约束。MTPA 是单位电流最大转矩轨迹。电压图将各项首尾相接，蓝色矢量是从原点指向合成端点的端电压。常参数模型依次连接永磁反电动势、电感电压和电阻压降。前两项的终点是旋转磁链电压。电感电压 V<sub>L</sub> 的 (d, q) 分量为 (−ω<sub>e</sub>L<sub>q</sub>i<sub>q</sub>, ω<sub>e</sub>L<sub>d</sub>i<sub>d</sub>)。磁链图模型使用当前工况的总磁链，显示 −ω<sub>e</sub>ψ<sub>q</sub> 在 d 轴上的分量和 ω<sub>e</sub>ψ<sub>d</sub> 在 q 轴上的分量。零值分量可在明细中查看。裕量等于极限减去实际幅值。</p><h3>工况回放</h3><p>导入 CSV 后点击表格行或播放。分析、回放和导出复用同一模型。示例电机与磁链数据用于方法验证。</p>",
       );
       break;
   }

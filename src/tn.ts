@@ -114,6 +114,7 @@ export function drawSpeedChart(
   rpm: number,
   torque: number | undefined,
   envelope: TorqueEnvelope | null,
+  showNegative: boolean,
 ) {
   const width = canvas.clientWidth,
     height = canvas.clientHeight;
@@ -134,19 +135,21 @@ export function drawSpeedChart(
   const samples = envelope?.samples ?? [];
   const limitTorque = Math.max(
     1,
-    Math.abs(torque ?? 0),
-    ...samples.flatMap(({ upper, lower }) => [
-      Math.abs(upper ?? 0),
-      Math.abs(lower ?? 0),
-    ]),
+    showNegative ? Math.abs(torque ?? 0) : (torque ?? 0),
+    ...samples.map(({ upper, lower }) =>
+      showNegative ? Math.max(upper ?? 0, -(lower ?? 0)) : (upper ?? 0),
+    ),
   );
-  const precision = 10 ** Math.floor(Math.log10(limitTorque / 2));
+  const tickCount = showNegative ? 2 : 4;
+  const precision = 10 ** Math.floor(Math.log10(limitTorque / tickCount));
   const torqueStep =
-    ([1, 2, 2.5, 5, 10].find((v) => v * precision >= limitTorque / 2) ?? 10) *
-    precision;
-  const extent = 2.2 * torqueStep;
+    ([1, 2, 2.5, 5, 10].find((v) => v * precision >= limitTorque / tickCount) ??
+      10) * precision;
+  const torqueMax = (tickCount + 0.2) * torqueStep;
+  const torqueMin = showNegative ? -torqueMax : 0;
   const X = (speed: number) => left + ((speed / span + 1) / 2) * (right - left);
-  const Y = (t: number) => top + ((1 - t / extent) / 2) * (bottom - top);
+  const Y = (t: number) =>
+    top + ((torqueMax - t) / (torqueMax - torqueMin)) * (bottom - top);
   const labelFont = '"Segoe UI","Microsoft YaHei",sans-serif';
   function line(x1: number, y1: number, x2: number, y2: number, color: string) {
     ctx.strokeStyle = color;
@@ -160,7 +163,7 @@ export function drawSpeedChart(
   ctx.textBaseline = "middle";
   ctx.textAlign = "right";
   ctx.lineWidth = 1;
-  for (let i = -2; i <= 2; i++) {
+  for (let i = showNegative ? -tickCount : 0; i <= tickCount; i++) {
     const t = i * torqueStep;
     line(left, Y(t), right, Y(t), i === 0 ? "#a9b8c9" : "#e2e8ef");
     ctx.fillText(String(+t.toPrecision(5)), left - 7, Y(t));
@@ -188,6 +191,10 @@ export function drawSpeedChart(
   ctx.textAlign = "right";
   ctx.fillText("n (rpm)", right, 11);
 
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(left, top, right - left, bottom - top);
+  ctx.clip();
   ctx.beginPath();
   for (let i = 1; i < samples.length; i++) {
     const a = samples[i - 1],
@@ -205,7 +212,7 @@ export function drawSpeedChart(
     ctx.lineTo(X(a.rpm), Y(a.lower));
     ctx.closePath();
   }
-  ctx.fillStyle = "#e3f3f6";
+  ctx.fillStyle = "rgba(38, 125, 155, 0.12)";
   ctx.fill();
   ctx.lineWidth = 1.8;
   ctx.strokeStyle = envelopeColor;
@@ -226,11 +233,12 @@ export function drawSpeedChart(
     }
     ctx.stroke();
   }
+  ctx.restore();
   ctx.lineWidth = 1;
   ctx.setLineDash([4, 3]);
   line(X(rpm), top, X(rpm), bottom, "#16796b");
   ctx.setLineDash([]);
-  if (torque !== undefined) {
+  if (torque !== undefined && (showNegative || torque >= 0)) {
     ctx.beginPath();
     ctx.arc(X(rpm), Y(torque), 4.3, 0, 2 * Math.PI);
     ctx.fillStyle = "#16796b";

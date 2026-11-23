@@ -85,7 +85,11 @@ try {
     "motor",
   );
   assert.equal(await page.locator("#tn-card + .plots").count(), 1);
-  const axis = await page.locator("#tn").boundingBox();
+  const speedChart = page.locator("#tn");
+  const showNegative = page.getByRole("checkbox", { name: "显示负转矩" });
+  assert.equal(await showNegative.isChecked(), false);
+  assert.match(await speedChart.getAttribute("aria-label"), /非负转矩/);
+  const axis = await speedChart.boundingBox();
   const speedSlider = page.locator("#s-rpm");
   const sliderBox = await speedSlider.boundingBox();
   assert.ok(sliderBox.y >= axis.y + axis.height);
@@ -218,6 +222,21 @@ try {
   await torque.fill("-25");
   await torque.press("Enter");
   await wait("m-torque", "-25.0");
+  const hiddenPoint = page.getByText("当前运行点为负转矩", { exact: true });
+  assert.ok(await hiddenPoint.isVisible());
+  const minSpeed = await speedSlider.getAttribute("min");
+  const maxSpeed = await speedSlider.getAttribute("max");
+  await showNegative.check();
+  assert.match(await speedChart.getAttribute("aria-label"), /正负转矩/);
+  assert.ok((await speedChart.boundingBox()).height > axis.height);
+  assert.ok(await hiddenPoint.isHidden());
+  assert.ok(await page.locator("#tn-point-key").isVisible());
+  assert.equal(await speedSlider.getAttribute("min"), minSpeed);
+  assert.equal(await speedSlider.getAttribute("max"), maxSpeed);
+  assert.equal(await text("m-torque"), "-25.0");
+  await showNegative.uncheck();
+  assert.match(await speedChart.getAttribute("aria-label"), /非负转矩/);
+  assert.ok(await hiddenPoint.isVisible());
 
   await file("open", {
     name: "max-output.json",
@@ -267,7 +286,7 @@ try {
   assert.equal(await rangeInput.inputValue(), String(automatic));
   assert.deepEqual(errors, []);
   console.log(
-    "Passed interaction, dual solvers, map, overshoot, replay, invalid rows, PNG/CSV, project save/reopen, reset and automatic speed range.",
+    "Passed interaction, dual solvers, map, overshoot, replay, invalid rows, PNG/CSV, project save/reopen, reset, automatic speed range and signed torque display.",
   );
 } finally {
   if (desktop) await desktop.close();

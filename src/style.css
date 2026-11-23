@@ -1041,17 +1041,26 @@ dialog .plot {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 5px 8px;
+  gap: 5px 16px;
   margin-left: auto;
   font-size: 12px;
   color: #455969;
 }
-.tn-controls label[for="n-speed-span"] {
-  margin-left: 8px;
+.tn-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tn-toggle {
+  margin: 0 0 0 5px;
+  white-space: nowrap;
 }
 .tn-plot {
   display: block;
   width: 100%;
+  height: clamp(136px, 16vh, 184px);
+}
+.tn-full .tn-plot {
   height: clamp(154px, 21vh, 252px);
 }
 .tn-slider input {
@@ -1092,6 +1101,7 @@ dialog .plot {
 @media (pointer: coarse) {
   .tn-card { --tn-thumb: 25px; }
   .tn-controls .number { min-height: 44px; }
+  .tn-toggle { min-height: 44px; }
   .tn-slider input { height: 44px; }
 }
 @media (pointer:coarse) and (orientation:portrait), (pointer:coarse) and (max-width:960px) {
@@ -1099,5 +1109,6 @@ dialog .plot {
 }
 @media (max-width: 550px) {
   .tn-card .card-head { flex-wrap: wrap; }
+  .tn-toggle { margin-left: auto; }
   .tn-controls { width: 100%; }
 }
