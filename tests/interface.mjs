@@ -90,6 +90,10 @@ try {
     await page.locator("#voltage + .legend").innerText(),
     /逆变器六边形/,
   );
+  assert.match(
+    await page.locator("#voltage + .legend").innerText(),
+    /永磁反电动势\s+电感电压\s+电阻压降/,
+  );
   const pwm = page.getByLabel("调制方式", { exact: true });
   assert.equal(await pwm.inputValue(), "SVPWM");
   await pwm.selectOption("SPWM");

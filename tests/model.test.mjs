@@ -169,7 +169,7 @@ test("constant-parameter voltage vectors sum with signed speed and current", () 
       const x = point(p, rpm, -40, 70);
       const components = voltageComponents(p, rpm, x);
       assert.equal(components.length, 3);
-      const [drop, magnet, inductive] = components;
+      const [magnet, inductive, drop] = components;
       assert.equal(mathHtml(inductive.symbol), "V<sub>L</sub>");
       const w = omega(p, rpm);
       close(drop.ud, resistance(p) * x.d);
@@ -177,6 +177,8 @@ test("constant-parameter voltage vectors sum with signed speed and current", () 
       close(magnet.uq, w * p.psi);
       close(inductive.ud, (-w * p.lq * x.q) / 1000);
       close(inductive.uq, (w * p.ld * x.d) / 1000);
+      close(magnet.ud + inductive.ud, x.ed);
+      close(magnet.uq + inductive.uq, x.eq);
       close(drop.ud + inductive.ud, x.ud);
       close(drop.uq + magnet.uq + inductive.uq, x.uq);
     }

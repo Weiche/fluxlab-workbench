@@ -460,7 +460,10 @@ export function chart(
         -22,
         true,
       );
-      for (const { term, d, q, endD, endQ } of voltageSegments) {
+      for (const [
+        index,
+        { term, d, q, endD, endQ },
+      ] of voltageSegments.entries()) {
         const ud = term.ud ?? 0,
           uq = term.uq ?? 0;
         if (Math.hypot(ud, uq) < 1e-7) continue;
@@ -473,6 +476,18 @@ export function chart(
           term.axis === "dq"
             ? ["|", ...term.symbol, "|" + reading]
             : [...term.symbol, reading];
+        // Keep the final two-axis term's label away from the resultant shaft.
+        if (term.axis === "dq" && index === voltageSegments.length - 1) {
+          label(
+            caption,
+            x,
+            y,
+            term.color,
+            x < cx ? -captionWidth(caption) - 24 : 14,
+            12,
+          );
+          continue;
+        }
         const offset =
           term.axis === "dq"
             ? 12

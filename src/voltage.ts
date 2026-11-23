@@ -56,7 +56,6 @@ export function voltageComponents(
   }
 
   return [
-    resistanceDrop,
     {
       label: "永磁反电动势",
       symbol: [...math.omega, ...math.psiF],
@@ -73,5 +72,6 @@ export function voltageComponents(
       ud: point ? -w * ((p.lq * point.q) / 1000) : undefined,
       uq: point ? w * ((p.ld * point.d) / 1000) : undefined,
     },
+    resistanceDrop,
   ];
 }
