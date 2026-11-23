@@ -82,6 +82,15 @@ try {
   );
   assert.match(await page.locator("#values").innerHTML(), /ψ<sub>f<\/sub>/);
   assert.match(await text("values"), /电感电压.*-88.57.*-15.28/);
+  assert.match(
+    await page.locator("#voltage + .legend").innerText(),
+    /逆变器六边形/,
+  );
+  const directLimit = page.getByLabel("直接给定可用电压上限", { exact: true });
+  await directLimit.check();
+  assert.ok(await page.locator("#s-vdc").isVisible());
+  assert.ok(await page.locator("#s-vmax").isVisible());
+  await directLimit.uncheck();
   await by("compare").click();
   await wait("dialog-body", "数值法");
   await by("close").click();
@@ -100,9 +109,10 @@ try {
   assert.equal((await grab("png")).subarray(1, 4).toString(), "PNG");
   await by("expand-voltage").click();
   assert.ok(await page.locator("#zoom").isVisible());
+  assert.match(await page.locator("#zoom + .legend").innerText(), /电感电压/);
   assert.match(
     await page.locator("#zoom + .legend").innerText(),
-    /电感电压/,
+    /逆变器六边形/,
   );
   await by("close").click();
   await page.locator("#model-choice").selectOption("map");

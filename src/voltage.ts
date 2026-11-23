@@ -1,6 +1,15 @@
 import { omega, type Parameters, type Point } from "./model.ts";
 import { math, type MathRun } from "./notation.ts";
 
+// Active states of a two-level inverter, in the phase-peak convention.
+export function inverterHexagonAtZero(vdc: number) {
+  const radius = (2 * vdc) / 3;
+  return Array.from({ length: 6 }, (_, index) => {
+    const angle = (index * Math.PI) / 3;
+    return { d: radius * Math.cos(angle), q: radius * Math.sin(angle) };
+  });
+}
+
 export interface VoltageComponent {
   label: string;
   symbol: readonly MathRun[];

@@ -5,7 +5,7 @@ import {
   type Result,
 } from "./model.ts";
 import type { Geometry } from "./geometry.ts";
-import { voltageComponents } from "./voltage.ts";
+import { inverterHexagonAtZero, voltageComponents } from "./voltage.ts";
 import { math, mathCanvasLayout, type MathText } from "./notation.ts";
 export interface Frame {
   p: Parameters;
@@ -18,6 +18,7 @@ const blue = "#2963d9",
   orange = "#ce8740",
   purple = "#9670ba",
   ink = "#23344a";
+export const inverterBoundaryColor = "#7255a5";
 const font = '"Inter","Segoe UI","Noto Sans CJK SC",sans-serif';
 const grid = "#e5eaf0",
   axis = "#9daaba",
@@ -41,8 +42,10 @@ export function chart(
   c.fillStyle = "#fff";
   c.fillRect(0, 0, W, H);
   const current = kind === "current";
+  const hexagon = current ? [] : inverterHexagonAtZero(p.vdc);
+  const zeroVertex = hexagon[0];
   const voltageSegments = [];
-  let voltageExtent = Math.max(limit(p), pt?.voltage ?? 0);
+  let voltageExtent = Math.max(limit(p), pt?.voltage ?? 0, zeroVertex?.d ?? 0);
   if (!current && pt) {
     let d = 0,
       q = 0;
@@ -264,7 +267,15 @@ export function chart(
       }
       if (coords.length) path(coords, teal, 1.5, [5, 4]);
     }
-  } else circle(cx, cy, vlim * s, orange, 1.65, [6, 4]);
+  } else if (zeroVertex) {
+    path(
+      [...hexagon, zeroVertex].flatMap(({ d, q }) => [X(d), Y(q)]),
+      inverterBoundaryColor,
+      1.9,
+    );
+    circle(cx, cy, vlim * s, orange, 1.65, [6, 4]);
+    circle(X(zeroVertex.d), cy, 2.5, inverterBoundaryColor, 1.5);
+  }
   if (pt) {
     function arrow(
       x: number,
@@ -473,6 +484,15 @@ export function chart(
         label(caption, x, y, term.color, offset, term.axis === "d" ? -24 : 6);
       }
     }
+    if (zeroVertex)
+      label(
+        "0° · " + zeroVertex.d.toFixed(1) + " V",
+        X(zeroVertex.d),
+        cy,
+        inverterBoundaryColor,
+        10,
+        16,
+      );
     label(
       [...math.vmax, " " + vlim.toFixed(1) + " V"],
       X(vlim * 0.707),

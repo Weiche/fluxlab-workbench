@@ -10,7 +10,7 @@ import {
   omega,
 } from "../src/model.ts";
 import { readMap, readBatch, readProject } from "../src/files.ts";
-import { voltageComponents } from "../src/voltage.ts";
+import { inverterHexagonAtZero, voltageComponents } from "../src/voltage.ts";
 import { mathHtml } from "../src/notation.ts";
 const close = (a, b, e = 1e-5) =>
   assert.ok(Math.abs(a - b) <= e, `${a} != ${b}`);
@@ -193,4 +193,23 @@ test("flux-map voltage decomposition uses both total flux axes", () => {
       ({ ud, uq }) => ud === undefined && uq === undefined,
     ),
   );
+});
+
+test("inverter hexagon starts on the positive d axis and contains the linear SVPWM circle", () => {
+  for (const vdc of [260, 400]) {
+    const vertices = inverterHexagonAtZero(vdc);
+    const radius = (2 * vdc) / 3;
+    assert.equal(vertices.length, 6);
+    assert.deepEqual(vertices[0], { d: radius, q: 0 });
+    for (const [index, vertex] of vertices.entries()) {
+      const next = vertices[(index + 1) % vertices.length];
+      close(Math.hypot(vertex.d, vertex.q), radius);
+      close(Math.hypot(next.d - vertex.d, next.q - vertex.q), radius);
+      close(
+        Math.hypot(vertex.d + next.d, vertex.q + next.q) / 2,
+        limit({ ...defaults, vdc }),
+      );
+    }
+    assert.ok(vertices[1].q > 0);
+  }
 });
