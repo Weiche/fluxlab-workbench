@@ -1,0 +1,19 @@
+{
+  "name": "fluxlab-workbench",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc --noEmit && vite build && node scripts/portable.mjs",
+    "test": "node --experimental-strip-types --test tests/*.test.mjs",
+    "package:win": "bash scripts/package-win.sh",
+    "test:ui": "node tests/interface.mjs",
+    "test:perf": "node tests/performance.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "typescript": "5.9.3",
+    "vite": "7.3.1"
+  }
+}
