@@ -4,6 +4,7 @@ export interface FluxMap {
   fd: number[][];
   fq: number[][];
 }
+export const pwmMethods = ["SVPWM", "SPWM"] as const;
 export interface Parameters {
   poles: number;
   ld: number;
@@ -16,6 +17,7 @@ export interface Parameters {
   useK: boolean;
   k: number;
   direct: boolean;
+  pwm: (typeof pwmMethods)[number];
   vdc: number;
   vmax: number;
   imax: number;
@@ -42,10 +44,11 @@ export const defaults: Parameters = {
   useK: false,
   k: 0.95,
   direct: false,
+  pwm: "SVPWM",
   vdc: 260,
   vmax: 150,
   imax: 120,
-  model: "ideal",
+  model: "engineering",
   solver: "analytic",
   map: null,
 };
@@ -56,10 +59,12 @@ export const initial: Operation = {
   id: 0,
   iq: 80,
 };
-export const limit = (p: Parameters) =>
-  p.direct
-    ? p.vmax
-    : (p.vdc * (p.model !== "ideal" && p.useK ? p.k : 1)) / Math.sqrt(3);
+export function limit(p: Parameters) {
+  if (p.direct) return p.vmax;
+  const divisor = p.pwm === "SPWM" ? 2 : Math.sqrt(3);
+  const utilization = p.model !== "ideal" && p.useK ? p.k : 1;
+  return (p.vdc * utilization) / divisor;
+}
 export const resistance = (p: Parameters) =>
   p.model !== "ideal" && p.useR
     ? p.rs * (p.useTemp ? 1 + 0.00393 * (p.temperature - 20) : 1)

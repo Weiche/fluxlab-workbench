@@ -4,6 +4,7 @@ import {
   defaults,
   initial,
   limit,
+  pwmMethods,
   statusText,
   type Parameters,
   type Operation,
@@ -17,8 +18,10 @@ import {
   download,
   type Row,
 } from "./files.ts";
-import { chart, type Frame } from "./charts.ts";
+import { chart, inverterBoundaryColor, type Frame } from "./charts.ts";
 import type { Geometry } from "./geometry.ts";
+import { voltageComponents } from "./voltage.ts";
+import { math, mathHtml, mathCanvasLayout, type MathText } from "./notation.ts";
 import SolverWorker from "./worker.ts?worker&inline";
 import batchExample from "../public/examples/operating-points.csv?raw";
 import mapExample from "../public/examples/flux-map.csv?raw";
@@ -75,10 +78,20 @@ const iconButton = (action: string, title: string, ic: string) =>
   '">' +
   icon(ic) +
   "</button>";
+const voltageLegend = (parameters: Parameters) =>
+  '<span><i style="--color:#2963d9"></i>端电压</span>' +
+  voltageComponents(parameters, 0, null)
+    .map(
+      ({ label, color }) =>
+        `<span><i style="--color:${color}"></i>${label}</span>`,
+    )
+    .join("") +
+  `<span><i class="dash" style="--color:#ce8740"></i>${parameters.direct ? "给定电压限值" : parameters.pwm + " 电压限值"}</span>` +
+  `<span><i style="--color:${inverterBoundaryColor}"></i>逆变器六边形</span>`;
 const legend = (kind: string) =>
   kind === "current"
     ? '<span><i class="area"></i>可行域</span><span><i style="--color:#2963d9"></i>电流极限</span><span><i style="--color:#ce8740"></i>电压极限</span><span><i class="dash" style="--color:#9670ba"></i>等转矩线</span><span class="mtpa"><i class="dash" style="--color:#10988b"></i>MTPA</span><span class="no-data" hidden><i class="unmapped"></i>无数据</span>'
-    : '<span><i style="--color:#2963d9"></i>端电压</span><span><i style="--color:#9670ba"></i>d 轴分量</span><span><i style="--color:#10988b"></i>q 轴分量</span><span><i class="dash" style="--color:#ce8740"></i>电压极限</span>';
+    : voltageLegend(frame?.p ?? p);
 const card = (key: string, title: string, ic: string, color: string) =>
   '<section class="card"><div class="card-head"><span class="icon-tile ' +
   color +
@@ -117,7 +130,7 @@ const metric = (
 $("app").innerHTML =
   `<header><div class="brand"><img src="./flux.svg" alt=""><b>FluxLab</b><span>电机分析工作台</span></div><nav aria-label="工作区"><button data-action="analysis" id="nav-analysis" class="sel">${icon("analysis")}运行分析</button><button data-action="batch" id="nav-batch">${icon("batch")}工况回放</button></nav><div class="head-actions"><button data-action="open" title="打开项目">${icon("folder")}<span>打开项目</span></button><button data-action="save" title="保存项目">${icon("save")}<span>保存项目</span></button><i class="divider"></i>${iconButton("help", "使用说明", "help")}</div></header>
 <div class="shell" id="shell"><aside><div class="side-title">${icon("sliders", 18)}<strong>参数设置</strong>${iconButton("reset", "恢复示例参数", "reset")}</div><div class="side-body" id="side"></div></aside>
-<main><div class="page-head"><div><h1 id="page-title">稳态运行分析</h1><div class="project-meta">${icon("motor", 14)}<span id="project-name"></span><i></i><span id="model-meta"></span></div></div><div class="details-action"><label class="head-model">${icon("model", 14)}<select aria-label="模型" id="model-choice"><option value="ideal">理想模型</option><option value="engineering">常参数工程模型</option><option value="map">磁链图模型</option></select></label><button class="small-btn hide-side" data-action="sidebar" aria-expanded="false" aria-controls="side">${icon("sliders")}参数</button><div class="popup-wrap"><button class="btn primary" data-action="export-menu" aria-haspopup="true" aria-expanded="false" id="export-btn">${icon("export")}导出结果${icon("down", 12)}</button><div id="export-menu" class="menu" hidden><button data-action="csv">导出结果 CSV</button><button data-action="png">导出双图 PNG</button></div></div></div></div>
+<main><div class="page-head"><div><h1 id="page-title">稳态运行分析</h1><div class="project-meta">${icon("motor", 14)}<span id="project-name"></span><i></i><span id="model-meta"></span></div></div><div class="details-action"><label class="head-model">${icon("model", 14)}<select aria-label="模型" id="model-choice"><option value="engineering">常参数工程模型</option><option value="ideal">理想模型</option><option value="map">磁链图模型</option></select></label><button class="small-btn hide-side" data-action="sidebar" aria-expanded="false" aria-controls="side">${icon("sliders")}参数</button><div class="popup-wrap"><button class="btn primary" data-action="export-menu" aria-haspopup="true" aria-expanded="false" id="export-btn">${icon("export")}导出结果${icon("down", 12)}</button><div id="export-menu" class="menu" hidden><button data-action="csv">导出结果 CSV</button><button data-action="png">导出双图 PNG</button></div></div></div></div>
 <section class="card batch-panel" id="batch-panel" hidden><div class="section-head"><span class="icon-tile">${icon("batch")}</span><h2>工况序列</h2><div class="batch-actions"><button class="small-btn" data-action="batch-import">${icon("folder", 14)}导入 CSV</button><button class="small-btn" data-action="sample">载入示例</button>${iconButton("prev", "上一工况", "prev")}${iconButton("play", "播放或暂停", "play")}${iconButton("next", "下一工况", "next")}</div></div><div id="batch-list"></div></section>
 <section class="metrics" aria-label="运行指标">${metric("torque", "电磁转矩", "torque", "#147f72", "N·m")}${metric("current", "电流幅值", "wave", "#3472b9", "A")}${metric("voltage", "电压幅值", "bolt", "#ba843b", "V")}${metric("speed", "机械转速", "speed", "#8371a6", "rpm")}</section>
 <div class="plots">${card("current", "电流平面约束分析", "grid", "")}${card("voltage", "电压平面矢量图", "vector", "blue")}</div>
@@ -157,17 +170,20 @@ const labels: Record<Key, string> = {
   temperature: "绕组温度",
   k: "电压利用率",
 };
-const symbols: Partial<Record<Key, string>> = {
+const symbols: Partial<Record<Key, MathText>> = {
   rpm: "n",
-  torque: "Tₑ",
-  id: "iᵈ",
-  iq: "iᑫ",
+  torque: math.te,
+  id: math.id,
+  iq: math.iq,
   poles: "p",
-  ld: "Lᵈ",
-  lq: "Lᑫ",
-  psi: "ψf",
-  vdc: "Udc",
-  imax: "Imax",
+  ld: math.ld,
+  lq: math.lq,
+  psi: math.psiF,
+  vdc: math.vdc,
+  vmax: math.vmax,
+  imax: math.imax,
+  rs: math.rs,
+  k: math.voltageUse,
 };
 const source = (k: Key) => (k in o ? o[k as "rpm"] : p[k as "ld"]);
 const num = (k: Key) =>
@@ -195,7 +211,7 @@ function field(k: Key) {
     '">' +
     labels[k] +
     ' <i class="symbol">' +
-    (symbols[k] ?? "") +
+    mathHtml(symbols[k] ?? "") +
     "</i></label>" +
     num(k) +
     "</div>"
@@ -211,7 +227,7 @@ function range(k: Key, lo: number, hi: number, step: number) {
     '">' +
     labels[k] +
     ' <i class="symbol">' +
-    (symbols[k] ?? "") +
+    mathHtml(symbols[k] ?? "") +
     "</i></label>" +
     num(k) +
     '</div><input id="s-' +
@@ -278,8 +294,21 @@ function sidebar() {
     (map
       ? '<p class="note">磁链来自导入的 dq 查表数据。</p>'
       : field("ld") + field("lq") + field("psi"));
+  const modulation =
+    '<div class="field"><label for="pwm-method">调制方式</label><select id="pwm-method"' +
+    (p.direct ? " disabled" : "") +
+    ">" +
+    pwmMethods
+      .map(
+        (method) =>
+          `<option${method === p.pwm ? " selected" : ""}>${method}</option>`,
+      )
+      .join("") +
+    "</select></div>";
   const constraint =
-    range(p.direct ? "vmax" : "vdc", 1, p.direct ? 600 : 800, 1) +
+    modulation +
+    range("vdc", 1, 800, 1) +
+    (p.direct ? range("vmax", 1, 600, 1) : "") +
     range("imax", 1, 400, 1) +
     flag("direct", "直接给定可用电压上限");
   $<HTMLSelectElement>("model-choice").value = p.model;
@@ -459,8 +488,17 @@ function renderFrame() {
       "A",
     ) +
     val("端电压", x?.ud, x?.uq, "V") +
-    val("旋转磁链电压", x?.ed, x?.eq, "V") +
-    val("电阻压降", x?.rd, x?.rq, "V");
+    voltageComponents(v, op.rpm, x)
+      .map(({ label, symbol, ud, uq }) =>
+        val(label + " " + mathHtml(symbol), ud, uq, "V"),
+      )
+      .join("");
+  const legendElement = $("voltage").nextElementSibling!;
+  const legendKey = `${v.model}/${v.direct ? "direct" : v.pwm}`;
+  if (legendElement.getAttribute("data-model") !== legendKey) {
+    legendElement.innerHTML = voltageLegend(v);
+    legendElement.setAttribute("data-model", legendKey);
+  }
   const margin = (
     name: string,
     num: number | undefined,
@@ -563,6 +601,11 @@ $("side").addEventListener("change", (e) => {
     enqueue(true);
     return;
   }
+  if (el.id === "pwm-method") {
+    p = { ...p, pwm: el.value as Parameters["pwm"] };
+    enqueue(true);
+    return;
+  }
   if (el.id === "solver") {
     p = { ...p, solver: el.value as Parameters["solver"] };
     enqueue(true);
@@ -628,7 +671,7 @@ function showComparison() {
   modal(
     "同一工况的求解器对照",
     b
-      ? '<table class="data-table comparison"><thead><tr><th>方法</th><th>id / A</th><th>iq / A</th><th>Te / N·m</th><th>ΔU / V</th><th>转矩残差 / N·m</th></tr></thead><tbody>' +
+      ? '<table class="data-table comparison"><thead><tr><th>方法</th><th>i<sub>d</sub> / A</th><th>i<sub>q</sub> / A</th><th>T<sub>e</sub> / N·m</th><th>ΔV / V</th><th>转矩残差 / N·m</th></tr></thead><tbody>' +
           line(a) +
           line(b) +
           "</tbody></table>" +
@@ -879,6 +922,7 @@ function exportPng() {
         : "给定 " + op.id + ", " + op.iq + " A",
       statusText[r.status],
       r.method,
+      v.direct ? "给定电压限值" : v.pwm,
       "相峰值",
     ].join("   ·   "),
     24,
@@ -899,25 +943,23 @@ function exportPng() {
   draw(a, 0, "电流平面约束分析");
   draw(b, 700, "电压平面矢量图");
   ctx.font = "15px sans-serif";
-  ctx.fillText(
-    "P  ( " +
-      f(r.point?.d, 2) +
-      ", " +
-      f(r.point?.q, 2) +
-      " ) A     Te  " +
-      f(r.point?.torque, 2) +
-      " N·m     ΔI  " +
-      f(r.point?.im, 2) +
-      " A",
-    24,
-    518,
-  );
+  const currentCaption = [
+    "P  ( " + f(r.point?.d, 2) + ", " + f(r.point?.q, 2) + " ) A     ",
+    ...math.te,
+    "  " + f(r.point?.torque, 2) + " N·m     ΔI  " + f(r.point?.im, 2) + " A",
+  ];
+  for (const run of mathCanvasLayout(ctx, currentCaption, "sans-serif", 15)
+    .runs) {
+    ctx.font = run.fontSpec;
+    ctx.fillText(run.text, 24 + run.x, 518 + run.y);
+  }
+  ctx.font = "15px sans-serif";
   ctx.fillText(
     "P  ( " +
       f(r.point?.ud, 2) +
       ", " +
       f(r.point?.uq, 2) +
-      " ) V     ΔU  " +
+      " ) V     ΔV  " +
       f(r.point?.vm, 2) +
       " V",
     724,
@@ -1000,7 +1042,12 @@ async function action(a: string) {
       changeTab(a);
       break;
     case "sidebar":
-      document.querySelector('[data-action="sidebar"]')?.setAttribute("aria-expanded", String($("shell").classList.toggle("show-side")));
+      document
+        .querySelector('[data-action="sidebar"]')
+        ?.setAttribute(
+          "aria-expanded",
+          String($("shell").classList.toggle("show-side")),
+        );
       break;
     case "auto":
     case "manual": {
@@ -1123,7 +1170,7 @@ async function action(a: string) {
     case "help":
       modal(
         "坐标约定与模型说明",
-        "<h3>输入与运行点</h3><p>转速为有符号机械转速。电流、电压均为相基波峰值。自动求点寻找满足目标电磁转矩的最小电流，手动验点直接计算指定电流。P 表示选中的运行点或标明的边界点。</p><h3>稳态 dq 方程</h3><p>ωₑ = 2πpn / 60<br>uᵈ = Rₛiᵈ − ωₑψᑫ　　uᑫ = Rₛiᑫ + ωₑψᵈ<br>Tₑ = 1.5p (ψᵈiᑫ − ψᑫiᵈ)</p><h3>模型与约束</h3><p>理想模型使用常数电感与永磁体磁链，定子电阻为零。工程模型可启用铜阻和温度修正，铜温度系数取 0.00393 / °C。磁链图以双线性插值计算总磁链。线性 SVPWM 电压上限为 kᵤUdc / √3。</p><h3>读图</h3><p>电流图的着色区域同时满足电流与电压约束。MTPA 是单位电流最大转矩轨迹。电压图的端电压为电阻压降与旋转磁链电压的矢量和。裕量等于极限减去实际幅值。</p><h3>工况回放</h3><p>导入 CSV 后点击表格行或播放。分析、回放和导出复用同一模型。示例电机与磁链数据用于方法验证。</p>",
+        "<h3>输入与运行点</h3><p>转速为有符号机械转速。电流、电压均为相基波峰值。自动求点寻找满足目标电磁转矩的最小电流，手动验点直接计算指定电流。P 表示选中的运行点或标明的边界点。</p><h3>稳态 dq 方程</h3><p>ω<sub>e</sub> = 2πpn / 60<br>V<sub>d</sub> = R<sub>s</sub>i<sub>d</sub> − ω<sub>e</sub>ψ<sub>q</sub>　　V<sub>q</sub> = R<sub>s</sub>i<sub>q</sub> + ω<sub>e</sub>ψ<sub>d</sub><br>T<sub>e</sub> = 1.5p (ψ<sub>d</sub>i<sub>q</sub> − ψ<sub>q</sub>i<sub>d</sub>)</p><h3>模型与约束</h3><p>默认使用常参数工程模型，并计入定子电阻。可关闭定子电阻或切换到理想模型进行对照。工程模型可按绕组温度修正铜阻，铜温度系数取 0.00393 / °C。磁链图以双线性插值计算总磁链。线性调制的相电压峰值上限，SVPWM 为 V<sub>dc</sub> / √3，SPWM 为 V<sub>dc</sub> / 2。常参数工程模型与磁链图模型可再乘以电压利用率 k<sub>v</sub>。直接给定电压上限时，求解使用输入的电压值。紫色六边形表示理想两电平逆变器可合成的平均电压范围，顶点幅值为 2V<sub>dc</sub> / 3。图中取转子电角度 0°，第一个顶点沿正 d 轴。橙色圆表示求解采用的电压限值。</p><h3>读图</h3><p>电流图的着色区域同时满足电流与电压约束。MTPA 是单位电流最大转矩轨迹。电压图将各项首尾相接，蓝色矢量是从原点指向合成端点的端电压。常参数模型依次连接永磁反电动势、电感电压和电阻压降。前两项的终点是旋转磁链电压。电感电压 V<sub>L</sub> 的 (d, q) 分量为 (−ω<sub>e</sub>L<sub>q</sub>i<sub>q</sub>, ω<sub>e</sub>L<sub>d</sub>i<sub>d</sub>)。磁链图模型使用当前工况的总磁链，显示 −ω<sub>e</sub>ψ<sub>q</sub> 在 d 轴上的分量和 ω<sub>e</sub>ψ<sub>d</sub> 在 q 轴上的分量。零值分量可在明细中查看。裕量等于极限减去实际幅值。</p><h3>工况回放</h3><p>导入 CSV 后点击表格行或播放。分析、回放和导出复用同一模型。示例电机与磁链数据用于方法验证。</p>",
       );
       break;
   }

@@ -75,6 +75,44 @@ try {
   }
   await wait("status", "可行运行点");
   assert.equal(await text("m-torque"), "48.0");
+  assert.equal(await page.locator("#model-choice").inputValue(), "engineering");
+  assert.equal(await text("method"), "数值法");
+  assert.ok(await page.getByLabel("计入定子电阻", { exact: true }).isChecked());
+  assert.match(await text("values"), /电阻压降.*-1.22.*3.52/);
+  assert.match(await text("values"), /永磁反电动势/);
+  assert.match(
+    await page.locator("label[for=s-vdc]").innerHTML(),
+    /V<sub>dc<\/sub>/,
+  );
+  assert.match(await page.locator("#values").innerHTML(), /ψ<sub>f<\/sub>/);
+  assert.match(await text("values"), /电感电压.*-88.57.*-15.28/);
+  assert.match(
+    await page.locator("#voltage + .legend").innerText(),
+    /逆变器六边形/,
+  );
+  assert.match(
+    await page.locator("#voltage + .legend").innerText(),
+    /永磁反电动势\s+电感电压\s+电阻压降/,
+  );
+  const pwm = page.getByLabel("调制方式", { exact: true });
+  assert.equal(await pwm.inputValue(), "SVPWM");
+  await pwm.selectOption("SPWM");
+  await wait("f-voltage", "130.0 V");
+  assert.match(
+    await page.locator("#voltage + .legend").innerText(),
+    /SPWM 电压限值/,
+  );
+  await pwm.selectOption("SVPWM");
+  await wait("f-voltage", "150.1 V");
+  const directLimit = page.getByLabel("直接给定可用电压上限", { exact: true });
+  await directLimit.check();
+  assert.ok(await pwm.isDisabled());
+  assert.ok(await page.locator("#s-vdc").isVisible());
+  assert.ok(await page.locator("#s-vmax").isVisible());
+  await directLimit.uncheck();
+  await page.locator("#model-choice").selectOption("ideal");
+  await wait("method", "解析法");
+  assert.match(await text("values"), /电阻压降.*0.00.*0.00/);
   await by("compare").click();
   await wait("dialog-body", "数值法");
   await by("close").click();
@@ -93,10 +131,20 @@ try {
   assert.equal((await grab("png")).subarray(1, 4).toString(), "PNG");
   await by("expand-voltage").click();
   assert.ok(await page.locator("#zoom").isVisible());
+  assert.match(await page.locator("#zoom + .legend").innerText(), /电感电压/);
+  assert.match(
+    await page.locator("#zoom + .legend").innerText(),
+    /逆变器六边形/,
+  );
   await by("close").click();
   await page.locator("#model-choice").selectOption("map");
   await by("map-sample").click();
   await wait("status", "超出磁链图");
+  assert.match(
+    await page.locator("#voltage + .legend").innerText(),
+    /q 轴磁链项/,
+  );
+  assert.match(await text("values"), /d 轴磁链项/);
   await file("open", {
     name: "saved.json",
     mimeType: "application/json",
@@ -104,6 +152,7 @@ try {
   });
   await wait("status", "超出约束");
   assert.equal(await page.locator("#n-iq").inputValue(), "155");
+  assert.equal(await page.locator("#model-choice").inputValue(), "ideal");
   await by("batch").click();
   await by("sample").click();
   await wait("batch-list", "目标不可达");
@@ -127,12 +176,12 @@ try {
   await by("next").click();
   await wait("m-torque", "24.0");
   await by("analysis").click();
-  await page.locator("#model-choice").selectOption("engineering");
-  await wait("method", "数值法");
   await by("reset").click();
   await by("confirm-reset").click();
   await wait("m-torque", "48.0");
-  await wait("method", "解析法");
+  await wait("method", "数值法");
+  assert.equal(await page.locator("#model-choice").inputValue(), "engineering");
+  assert.ok(await page.getByLabel("计入定子电阻", { exact: true }).isChecked());
   assert.deepEqual(errors, []);
   console.log(
     "Passed interaction, dual solvers, map, overshoot, replay, invalid rows, PNG/CSV, project save/reopen and reset.",

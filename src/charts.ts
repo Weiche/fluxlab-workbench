@@ -5,6 +5,8 @@ import {
   type Result,
 } from "./model.ts";
 import type { Geometry } from "./geometry.ts";
+import { inverterHexagonAtZero, voltageComponents } from "./voltage.ts";
+import { math, mathCanvasLayout, type MathText } from "./notation.ts";
 export interface Frame {
   p: Parameters;
   o: Operation;
@@ -16,6 +18,7 @@ const blue = "#2963d9",
   orange = "#ce8740",
   purple = "#9670ba",
   ink = "#23344a";
+export const inverterBoundaryColor = "#7255a5";
 const font = '"Inter","Segoe UI","Noto Sans CJK SC",sans-serif';
 const grid = "#e5eaf0",
   axis = "#9daaba",
@@ -38,14 +41,24 @@ export function chart(
   c.setTransform(dpr, 0, 0, dpr, 0, 0);
   c.fillStyle = "#fff";
   c.fillRect(0, 0, W, H);
-  const current = kind === "current",
-    ext = current
-      ? g.extent
-      : Math.max(
-          limit(p),
-          pt?.voltage ?? 0,
-          Math.hypot(pt?.rd ?? 0, pt?.rq ?? 0),
-        ) * 1.28;
+  const current = kind === "current";
+  const hexagon = current ? [] : inverterHexagonAtZero(p.vdc);
+  const zeroVertex = hexagon[0];
+  const voltageSegments = [];
+  let voltageExtent = Math.max(limit(p), pt?.voltage ?? 0, zeroVertex?.d ?? 0);
+  if (!current && pt) {
+    let d = 0,
+      q = 0;
+    for (const term of voltageComponents(p, o.rpm, pt)) {
+      const endD = d + (term.ud ?? 0),
+        endQ = q + (term.uq ?? 0);
+      voltageSegments.push({ term, d, q, endD, endQ });
+      voltageExtent = Math.max(voltageExtent, Math.hypot(endD, endQ));
+      d = endD;
+      q = endQ;
+    }
+  }
+  const ext = current ? g.extent : voltageExtent * 1.28;
   const cx = W / 2,
     cy = H / 2 + 2,
     s = Math.min((W - 60) / (2 * ext), (H - 35) / (2 * ext));
@@ -67,7 +80,7 @@ export function chart(
     c.setLineDash([]);
   }
   function text(
-    t: string,
+    t: MathText,
     x: number,
     y: number,
     color = ink,
@@ -75,11 +88,27 @@ export function chart(
     align: CanvasTextAlign = "left",
     f = font,
   ) {
-    c.font = size + "px " + f;
     c.fillStyle = color;
-    c.textAlign = align;
     c.textBaseline = "middle";
-    c.fillText(t, x, y);
+    if (typeof t === "string") {
+      c.font = size + "px " + f;
+      c.textAlign = align;
+      c.fillText(t, x, y);
+      return;
+    }
+    const { width, runs } = mathCanvasLayout(c, t, f, size);
+    const start =
+      align === "right" ? x - width : align === "center" ? x - width / 2 : x;
+    c.textAlign = "left";
+    for (const run of runs) {
+      c.font = run.fontSpec;
+      c.fillText(run.text, start + run.x, y + run.y);
+    }
+  }
+  function captionWidth(t: MathText) {
+    if (typeof t !== "string") return mathCanvasLayout(c, t, font, 11).width;
+    c.font = "11px " + font;
+    return c.measureText(t).width;
   }
   function circle(
     x: number,
@@ -99,7 +128,7 @@ export function chart(
   }
   const labels: { x: number; y: number; w: number; h: number }[] = [];
   function label(
-    t: string,
+    t: MathText,
     x: number,
     y: number,
     color: string,
@@ -107,8 +136,7 @@ export function chart(
     dy: number,
     solid = false,
   ) {
-    c.font = "11px " + font;
-    const w = c.measureText(t).width + 11,
+    const w = captionWidth(t) + 11,
       h = 19;
     let u = Math.max(3, Math.min(W - w - 3, x + dx)),
       v = Math.max(3, Math.min(H - h - 3, y + dy));
@@ -239,7 +267,15 @@ export function chart(
       }
       if (coords.length) path(coords, teal, 1.5, [5, 4]);
     }
-  } else circle(cx, cy, vlim * s, orange, 1.65, [6, 4]);
+  } else if (zeroVertex) {
+    path(
+      [...hexagon, zeroVertex].flatMap(({ d, q }) => [X(d), Y(q)]),
+      inverterBoundaryColor,
+      1.9,
+    );
+    circle(cx, cy, vlim * s, orange, 1.65, [6, 4]);
+    circle(X(zeroVertex.d), cy, 2.5, inverterBoundaryColor, 1.5);
+  }
   if (pt) {
     function arrow(
       x: number,
@@ -249,10 +285,11 @@ export function chart(
       color: string,
       lw: number,
     ) {
-      if (Math.hypot(u - x, v - y) < 2) return;
+      const length = Math.hypot(u - x, v - y);
+      if (length < 2) return;
       path([x, y, u, v], color, lw);
       const a = Math.atan2(v - y, u - x),
-        len = 8;
+        len = Math.min(8, length * 0.75);
       c.fillStyle = color;
       c.beginPath();
       c.moveTo(u, v);
@@ -278,21 +315,28 @@ export function chart(
         1,
         [3, 4],
       );
-      arrow(cx, cy, X(pt.ud), cy, purple, 2);
-      arrow(X(pt.ud), cy, X(pt.ud), Y(pt.uq), teal, 2);
-      arrow(cx, cy, X(pt.rd), Y(pt.rq), orange, 2.5);
-      if (Math.hypot(pt.rd, pt.rq) * s > 1)
-        arrow(X(pt.rd), Y(pt.rq), X(pt.ud), Y(pt.uq), teal, 2);
-      arrow(cx, cy, X(pt.ud), Y(pt.uq), blue, 2.7);
+      arrow(cx, cy, X(pt.ud), Y(pt.uq), blue, 3.8);
+      circle(X(pt.ud), Y(pt.uq), 3.5, blue, 1.5);
       c.fillStyle = ink;
       c.beginPath();
-      c.arc(cx, cy, 3, 0, 2 * Math.PI);
+      c.arc(cx, cy, 2.5, 0, 2 * Math.PI);
       c.fill();
+      for (const { term, d, q, endD, endQ } of voltageSegments) {
+        arrow(X(d), Y(q), X(endD), Y(endQ), term.color, 2.2);
+      }
     }
   }
   c.restore();
-  text(current ? "i_d (A)" : "u_d (V)", right, cy - 10, ink, 11, "right", mono);
-  text(current ? "i_q (A)" : "u_q (V)", cx + 9, top + 2, ink, 11, "left", mono);
+  const unit = current ? " (A)" : " (V)";
+  text(
+    [...(current ? math.id : math.vd), unit],
+    right,
+    cy - 10,
+    ink,
+    11,
+    "right",
+  );
+  text([...(current ? math.iq : math.vq), unit], cx + 9, top + 2);
   const boundary =
     r.status === "unreachable" ||
     r.status === "coverage" ||
@@ -309,7 +353,7 @@ export function chart(
         true,
       );
     label(
-      "Imax " + p.imax.toFixed(0) + " A",
+      [...math.imax, " " + p.imax.toFixed(0) + " A"],
       X(p.imax * 0.707),
       Y(-p.imax * 0.707),
       blue,
@@ -345,9 +389,12 @@ export function chart(
         }
       }
       label(
-        "Tₑ " +
-          (o.mode === "auto" ? o.torque : (pt?.torque ?? 0)).toFixed(1) +
-          " N·m",
+        [
+          ...math.te,
+          " " +
+            (o.mode === "auto" ? o.torque : (pt?.torque ?? 0)).toFixed(1) +
+            " N·m",
+        ],
         X(g.torque[k]),
         Y(g.torque[k + 1]),
         purple,
@@ -392,7 +439,7 @@ export function chart(
       label(
         [
           pt.im < 0 ? "ΔI " + pt.im.toFixed(1) + " A" : "",
-          pt.vm < 0 ? "ΔU " + pt.vm.toFixed(1) + " V" : "",
+          pt.vm < 0 ? "ΔV " + pt.vm.toFixed(1) + " V" : "",
         ]
           .filter(Boolean)
           .join("  "),
@@ -405,7 +452,7 @@ export function chart(
   } else {
     if (pt) {
       label(
-        "|u| " + pt.voltage.toFixed(1) + " V",
+        "|V| " + pt.voltage.toFixed(1) + " V",
         X(pt.ud),
         Y(pt.uq),
         blue,
@@ -413,29 +460,56 @@ export function chart(
         -22,
         true,
       );
-      if (Math.hypot(pt.rd, pt.rq) > 1e-7) {
-        label(
-          "Rₛ i " + Math.hypot(pt.rd, pt.rq).toFixed(1) + " V",
-          X(pt.rd),
-          Y(pt.rq),
-          orange,
-          10,
-          13,
-        );
-        label(
-          "ωₑψ " + Math.hypot(pt.ed, pt.eq).toFixed(1) + " V",
-          X(pt.rd + pt.ed * 0.55),
-          Y(pt.rq + pt.eq * 0.55),
-          teal,
-          9,
-          -10,
-        );
+      for (const [
+        index,
+        { term, d, q, endD, endQ },
+      ] of voltageSegments.entries()) {
+        const ud = term.ud ?? 0,
+          uq = term.uq ?? 0;
+        if (Math.hypot(ud, uq) < 1e-7) continue;
+        const value =
+          term.axis === "dq" ? Math.hypot(ud, uq) : term.axis === "d" ? ud : uq;
+        const x = X((d + endD) / 2),
+          y = Y((q + endQ) / 2);
+        const reading = " " + value.toFixed(1) + " V";
+        const caption =
+          term.axis === "dq"
+            ? ["|", ...term.symbol, "|" + reading]
+            : [...term.symbol, reading];
+        // Keep the final two-axis term's label away from the resultant shaft.
+        if (term.axis === "dq" && index === voltageSegments.length - 1) {
+          label(
+            caption,
+            x,
+            y,
+            term.color,
+            x < cx ? -captionWidth(caption) - 24 : 14,
+            12,
+          );
+          continue;
+        }
+        const offset =
+          term.axis === "dq"
+            ? 12
+            : term.axis === "d"
+              ? -38
+              : uq > 0
+                ? 10
+                : -captionWidth(caption) - 16;
+        label(caption, x, y, term.color, offset, term.axis === "d" ? -24 : 6);
       }
-      label("ud " + pt.ud.toFixed(1), X(pt.ud / 2), cy, purple, -28, 9);
-      label("uq " + pt.uq.toFixed(1), X(pt.ud), Y(pt.uq / 2), teal, -58, -2);
     }
+    if (zeroVertex)
+      label(
+        "0° · " + zeroVertex.d.toFixed(1) + " V",
+        X(zeroVertex.d),
+        cy,
+        inverterBoundaryColor,
+        10,
+        16,
+      );
     label(
-      "Umax " + vlim.toFixed(1) + " V",
+      [...math.vmax, " " + vlim.toFixed(1) + " V"],
       X(vlim * 0.707),
       Y(-vlim * 0.707),
       orange,

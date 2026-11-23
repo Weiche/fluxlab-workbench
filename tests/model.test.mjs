@@ -10,10 +10,22 @@ import {
   omega,
 } from "../src/model.ts";
 import { readMap, readBatch, readProject } from "../src/files.ts";
+import { inverterHexagonAtZero, voltageComponents } from "../src/voltage.ts";
+import { mathHtml } from "../src/notation.ts";
 const close = (a, b, e = 1e-5) =>
   assert.ok(Math.abs(a - b) <= e, `${a} != ${b}`);
+const ideal = { ...defaults, model: "ideal" };
 const run = (p = {}, op = {}) =>
-  solve({ ...defaults, ...p }, { ...initial, ...op });
+  solve({ ...ideal, ...p }, { ...initial, ...op });
+test("the default example solves with winding resistance", () => {
+  const { point: x, method, status } = solve(defaults, initial);
+  assert.equal(defaults.model, "engineering");
+  assert.equal(status, "ok");
+  assert.equal(method, "数值法");
+  close(resistance(defaults), 0.045);
+  close(Math.hypot(x.rd, x.rq), defaults.rs * x.current);
+  assert.ok(x.voltage > solve(ideal, initial).point.voltage);
+});
 test("surface PMSM uses iq = T / (1.5 p ψ), id = 0 at base speed", () => {
   const r = run({ ld: 0.9 }, { rpm: 450 });
   assert.equal(r.status, "ok");
@@ -144,8 +156,103 @@ test("nonlinear flux data changes the voltage contour and matches requested torq
     x = run(p, { torque: 40 });
   assert.equal(x.status, "ok");
   close(x.point.torque, 40);
-  const ref = point(defaults, 3200, -75, 75),
+  const ref = point(ideal, 3200, -75, 75),
     sat = point(p, 3200, -75, 75);
   assert.ok(Math.abs(ref.voltage - sat.voltage) > 1);
   assert.equal(run(p, { torque: 500 }).status, "unreachable");
+});
+
+test("constant-parameter voltage vectors sum with signed speed and current", () => {
+  for (const model of ["ideal", "engineering"]) {
+    const p = { ...defaults, model, useTemp: true };
+    for (const rpm of [3000, 0, -3000]) {
+      const x = point(p, rpm, -40, 70);
+      const components = voltageComponents(p, rpm, x);
+      assert.equal(components.length, 3);
+      const [magnet, inductive, drop] = components;
+      assert.equal(mathHtml(inductive.symbol), "V<sub>L</sub>");
+      const w = omega(p, rpm);
+      close(drop.ud, resistance(p) * x.d);
+      close(drop.uq, resistance(p) * x.q);
+      close(magnet.uq, w * p.psi);
+      close(inductive.ud, (-w * p.lq * x.q) / 1000);
+      close(inductive.uq, (w * p.ld * x.d) / 1000);
+      close(magnet.ud + inductive.ud, x.ed);
+      close(magnet.uq + inductive.uq, x.eq);
+      close(drop.ud + inductive.ud, x.ud);
+      close(drop.uq + magnet.uq + inductive.uq, x.uq);
+    }
+  }
+});
+
+test("flux-map voltage decomposition uses both total flux axes", () => {
+  const p = {
+    ...defaults,
+    model: "map",
+    map: readMap(
+      "id_A,iq_A,psi_d_Wb,psi_q_Wb\n4,-8,0.14,-0.025\n4,8,0.12,0.018\n20,-8,0.16,-0.028\n20,8,0.15,0.020",
+    ),
+  };
+  const rpm = -2400,
+    x = point(p, rpm, 10, -5);
+  const [drop, qFlux, dFlux] = voltageComponents(p, rpm, x);
+  assert.equal(mathHtml(qFlux.symbol), "−ω<sub>e</sub>ψ<sub>q</sub>");
+  assert.equal(mathHtml(dFlux.symbol), "ω<sub>e</sub>ψ<sub>d</sub>");
+  close(drop.ud + qFlux.ud, x.ud);
+  close(drop.uq + dFlux.uq, x.uq);
+  assert.ok(
+    voltageComponents(p, rpm, null).every(
+      ({ ud, uq }) => ud === undefined && uq === undefined,
+    ),
+  );
+});
+
+test("inverter hexagon starts on the positive d axis and contains the linear SVPWM circle", () => {
+  for (const vdc of [260, 400]) {
+    const vertices = inverterHexagonAtZero(vdc);
+    const radius = (2 * vdc) / 3;
+    assert.equal(vertices.length, 6);
+    assert.deepEqual(vertices[0], { d: radius, q: 0 });
+    for (const [index, vertex] of vertices.entries()) {
+      const next = vertices[(index + 1) % vertices.length];
+      close(Math.hypot(vertex.d, vertex.q), radius);
+      close(Math.hypot(next.d - vertex.d, next.q - vertex.q), radius);
+      close(
+        Math.hypot(vertex.d + next.d, vertex.q + next.q) / 2,
+        limit({ ...defaults, vdc }),
+      );
+    }
+    assert.ok(vertices[1].q > 0);
+  }
+});
+
+test("linear PWM limits drive feasibility and honor derating and direct override", () => {
+  const spwm = { ...defaults, pwm: "SPWM" };
+  close(limit(defaults), 260 / Math.sqrt(3));
+  close(limit(spwm), 130);
+  const op = { ...initial, mode: "manual", id: -27, iq: 78.3 };
+  assert.equal(solve(defaults, op).status, "ok");
+  assert.equal(solve(spwm, op).status, "over");
+  close(limit({ ...spwm, model: "engineering", useK: true }), 123.5);
+  close(limit({ ...spwm, direct: true, vmax: 140 }), 140);
+});
+
+test("project files preserve PWM selection and older projects default to SVPWM", () => {
+  const v = {
+    version: 1,
+    name: "调制方式",
+    p: { ...defaults, pwm: "SPWM" },
+    o: initial,
+    rows: [],
+    mapName: "",
+  };
+  assert.equal(readProject(JSON.stringify(v)).p.pwm, "SPWM");
+  assert.equal(
+    readProject(JSON.stringify({ ...v, p: { ...v.p, pwm: undefined } })).p.pwm,
+    "SVPWM",
+  );
+  assert.throws(
+    () => readProject(JSON.stringify({ ...v, p: { ...v.p, pwm: "invalid" } })),
+    /调制方式/,
+  );
 });
