@@ -1,5 +1,6 @@
 import {
   limit,
+  isMaxOutput,
   type Parameters,
   type Operation,
   type Result,
@@ -344,7 +345,13 @@ export function chart(
   if (current) {
     if (pt)
       label(
-        (boundary ? "边界点" : "运行点") + " P",
+        (boundary
+          ? "边界点"
+          : isMaxOutput(o)
+            ? o.rpm === 0
+              ? "最大静态转矩点"
+              : "最大出力点"
+            : "运行点") + " P",
         X(pt.d),
         Y(pt.q),
         teal,
@@ -392,7 +399,10 @@ export function chart(
         [
           ...math.te,
           " " +
-            (o.mode === "auto" ? o.torque : (pt?.torque ?? 0)).toFixed(1) +
+            (o.mode === "auto" && !isMaxOutput(o)
+              ? o.torque
+              : (pt?.torque ?? 0)
+            ).toFixed(1) +
             " N·m",
         ],
         X(g.torque[k]),

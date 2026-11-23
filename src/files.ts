@@ -117,6 +117,7 @@ function validOp(o: Operation) {
   return (
     o &&
     ["auto", "manual"].includes(o.mode) &&
+    (o.maxOutput === undefined || typeof o.maxOutput === "boolean") &&
     (["rpm", "torque", "id", "iq"] as const).every((k) => inRange(o[k], k))
   );
 }
