@@ -360,13 +360,13 @@ function section(
 }
 // Minimizing squared voltage over the current disk supplies a feasible section
 // even when the voltage ellipse only touches the disk between two grid nodes.
-function minimumVoltageD(p: Parameters, rpm: number) {
+function minimumVoltageCurrent(p: Parameters, rpm: number) {
   const w = omega(p, rpm),
     r = resistance(p),
     D = (w * p.ld) / 1000,
     Q = (w * p.lq) / 1000,
     e = w * p.psi;
-  if (w === 0) return 0;
+  if (w === 0) return { d: 0, q: 0 };
   const A = r * r + D * D,
     B = r * (D - Q),
     C = r * r + Q * Q;
@@ -378,7 +378,7 @@ function minimumVoltageD(p: Parameters, rpm: number) {
     };
   }
   const free = candidate(0);
-  if (Math.hypot(free.d, free.q) <= p.imax) return free.d;
+  if (Math.hypot(free.d, free.q) <= p.imax) return free;
   let lo = 0,
     hi = Math.max(1, Math.hypot(D * e, r * e) / p.imax);
   for (let i = 0; i < 60; i++) {
@@ -387,7 +387,7 @@ function minimumVoltageD(p: Parameters, rpm: number) {
     if (Math.hypot(x.d, x.q) > p.imax) lo = mid;
     else hi = mid;
   }
-  return candidate(hi).d;
+  return candidate(hi);
 }
 // Reject a target only when conservative interval bounds exclude it in
 // every relevant cell. An exhausted subdivision budget means "unresolved".
@@ -467,10 +467,14 @@ function excludedTarget(p: Parameters, o: Operation) {
     }
   return true;
 }
-function numerical(p: Parameters, o: Operation): Result {
+function numerical(
+  p: Parameters,
+  o: Operation,
+  torqueDirection?: 1 | -1,
+): Result {
   const m = p.model === "map" ? p.map : null,
-    maxOutput = isMaxOutput(o),
-    dir = (maxOutput ? o.rpm : o.torque) < 0 ? -1 : 1;
+    maxOutput = torqueDirection !== undefined || isMaxOutput(o),
+    dir = torqueDirection ?? ((maxOutput ? o.rpm : o.torque) < 0 ? -1 : 1);
   const request = {
     rpm: o.rpm,
     target: maxOutput ? undefined : o.torque,
@@ -504,7 +508,8 @@ function numerical(p: Parameters, o: Operation): Result {
       for (let i = 0; i < n; i++) xs.add(l + ((h - l) * i) / n);
       xs.add(h);
     }
-  if (!m) xs.add(Math.max(low, Math.min(high, minimumVoltageD(p, o.rpm))));
+  if (!m)
+    xs.add(Math.max(low, Math.min(high, minimumVoltageCurrent(p, o.rpm).d)));
   const grid = Array.from(xs).sort((a, b) => a - b);
   const refine = (l: number, h: number, kind: "best" | "edge") => {
     for (let j = 0; j < 32; j++) {
@@ -574,6 +579,20 @@ function numerical(p: Parameters, o: Operation): Result {
         : "empty";
   return { point: e, status, method: "数值法" };
 }
+export function torqueExtremum(
+  p: Parameters,
+  rpm: number,
+  direction: 1 | -1,
+): Result {
+  return numerical(p, { ...initial, rpm }, direction);
+}
+
+export function hasFeasibleCurrent(p: Parameters, rpm: number): boolean {
+  if (p.model === "map") return torqueExtremum(p, rpm, 1).point !== null;
+  const { d, q } = minimumVoltageCurrent(p, rpm);
+  return feasible(p, point(p, rpm, d, q)!);
+}
+
 export function solve(p: Parameters, o: Operation): Result {
   if (o.mode === "manual") {
     const x = point(p, o.rpm, o.id, o.iq);

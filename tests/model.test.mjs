@@ -8,10 +8,12 @@ import {
   limit,
   resistance,
   omega,
+  hasFeasibleCurrent,
 } from "../src/model.ts";
 import { readMap, readBatch, readProject } from "../src/files.ts";
 import { inverterHexagonAtZero, voltageComponents } from "../src/voltage.ts";
 import { mathHtml } from "../src/notation.ts";
+import { estimateSpeedRange, speedSpan, torqueEnvelope } from "../src/tn.ts";
 const close = (a, b, e = 1e-5) =>
   assert.ok(Math.abs(a - b) <= e, `${a} != ${b}`);
 const ideal = { ...defaults, model: "ideal" };
@@ -25,6 +27,50 @@ test("the default example solves with winding resistance", () => {
   close(resistance(defaults), 0.045);
   close(Math.hypot(x.rd, x.rq), defaults.rs * x.current);
   assert.ok(x.voltage > solve(ideal, initial).point.voltage);
+});
+test("the speed axis follows the machine, the requested range and the operating speed", () => {
+  const span = speedSpan(defaults, initial.rpm);
+  assert.ok(
+    speedSpan({ ...defaults, vdc: 2 * defaults.vdc }, initial.rpm) > span,
+  );
+  assert.equal(speedSpan(defaults, initial.rpm, 24000), 24000);
+  assert.ok(speedSpan(defaults, -29000, 24000) >= 29000);
+});
+test("the automatic speed range accounts for weakening and voltage limits", () => {
+  const reference = estimateSpeedRange(ideal);
+  const exact =
+    limit(ideal) /
+    (omega(ideal, 1) * (ideal.psi - (ideal.ld * ideal.imax) / 1000));
+  assert.ok(reference.foundLimit);
+  close(reference.edges[1], exact, 1);
+  close(reference.edges[0], -exact, 1);
+  assert.ok(reference.span > exact);
+  const lowerVoltage = { ...defaults, vdc: 200 };
+  const limited = estimateSpeedRange(lowerVoltage);
+  assert.ok(limited.span < estimateSpeedRange(defaults).span);
+  assert.ok(hasFeasibleCurrent(lowerVoltage, limited.edges[1]));
+  assert.ok(!hasFeasibleCurrent(lowerVoltage, limited.edges[1] + 1));
+  const deepWeakening = estimateSpeedRange({ ...defaults, imax: 250 });
+  assert.equal(deepWeakening.foundLimit, false);
+  assert.deepEqual(deepWeakening.edges, []);
+  assert.ok(deepWeakening.span > 0);
+});
+test("the speed envelope keeps both signed torque limits and infeasible gaps", () => {
+  const { samples, partial } = torqueEnvelope(defaults, 12000);
+  assert.equal(partial, false);
+  assert.equal(samples[0].upper, null);
+  assert.equal(samples.at(-1).lower, null);
+  const nearZero = samples.find(({ rpm }) => rpm === 0);
+  close(nearZero.upper, -nearZero.lower);
+  const forward = samples.find(({ rpm }) => rpm === 3000);
+  const reverse = samples.find(({ rpm }) => rpm === -3000);
+  assert.ok(forward.upper > 0 && forward.lower < 0);
+  close(forward.upper, -reverse.lower);
+  close(forward.lower, -reverse.upper);
+  close(
+    forward.upper,
+    solve(defaults, { ...initial, maxOutput: true }).point.torque,
+  );
 });
 test("surface PMSM uses iq = T / (1.5 p ψ), id = 0 at base speed", () => {
   const r = run({ ld: 0.9 }, { rpm: 450 });

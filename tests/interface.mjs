@@ -78,6 +78,19 @@ try {
   assert.equal(await page.locator("#model-choice").inputValue(), "engineering");
   assert.equal(await text("method"), "数值法");
   assert.ok(await page.getByLabel("计入定子电阻", { exact: true }).isChecked());
+  assert.equal(
+    await page
+      .getByLabel("计入定子电阻", { exact: true })
+      .evaluate((input) => input.closest("details").dataset.group),
+    "motor",
+  );
+  assert.equal(await page.locator("#tn-card + .plots").count(), 1);
+  const axis = await page.locator("#tn").boundingBox();
+  const speedSlider = page.locator("#s-rpm");
+  const sliderBox = await speedSlider.boundingBox();
+  assert.ok(sliderBox.y >= axis.y + axis.height);
+  closeTo(sliderBox.x + 7, axis.x + 58);
+  closeTo(sliderBox.x + sliderBox.width - 7, axis.x + axis.width - 34);
   assert.match(await text("values"), /电阻压降.*-1.22.*3.52/);
   assert.match(await text("values"), /永磁反电动势/);
   assert.match(
@@ -214,12 +227,54 @@ try {
   await wait("f-torque", "23.05 kW");
   assert.ok(await maxOutput.isChecked());
   assert.equal(await torque.inputValue(), "73.39");
+  const rangeInput = page.locator("#n-speed-span");
+  const rpmInput = page.locator("#n-rpm");
+  const waitForRange = (value) =>
+    page.waitForFunction(
+      (expected) => document.getElementById("s-rpm").max === expected,
+      value,
+    );
+  await waitForRange("11000");
+  const automatic = Number(await speedSlider.getAttribute("max"));
+  const busVoltage = page.locator("#n-vdc");
+  await busVoltage.fill("200");
+  await busVoltage.press("Enter");
+  await waitForRange("8100");
+  await busVoltage.fill("260");
+  await busVoltage.press("Enter");
+  await waitForRange("11000");
+  await rangeInput.fill("24000");
+  await rangeInput.press("Enter");
+  assert.equal(await speedSlider.getAttribute("max"), "24000");
+  assert.equal(await speedSlider.getAttribute("min"), "-24000");
+  const rangeProject = await grab("save");
+  assert.equal(JSON.parse(rangeProject).speedRange, 24000);
+  await rpmInput.fill("29000");
+  await rpmInput.press("Enter");
+  await wait("m-speed", "29,000");
+  assert.ok(Number(await speedSlider.getAttribute("max")) >= 29000);
+  assert.equal(await speedSlider.inputValue(), "29000");
+  await file("open", {
+    name: "speed-range.json",
+    mimeType: "application/json",
+    buffer: rangeProject,
+  });
+  await wait("m-speed", "3,000");
+  assert.equal(await speedSlider.getAttribute("max"), "24000");
+  await rangeInput.fill("");
+  await rangeInput.press("Enter");
+  await waitForRange(String(automatic));
+  assert.equal(await rangeInput.inputValue(), String(automatic));
   assert.deepEqual(errors, []);
   console.log(
-    "Passed interaction, dual solvers, map, overshoot, replay, invalid rows, PNG/CSV, project save/reopen and reset.",
+    "Passed interaction, dual solvers, map, overshoot, replay, invalid rows, PNG/CSV, project save/reopen, reset and automatic speed range.",
   );
 } finally {
   if (desktop) await desktop.close();
   if (browser) await browser.close();
   await rm(downloadDir, { recursive: true, force: true });
+}
+
+function closeTo(actual, expected) {
+  assert.ok(Math.abs(actual - expected) < 0.1, `${actual} != ${expected}`);
 }

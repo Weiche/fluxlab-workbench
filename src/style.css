@@ -1032,3 +1032,72 @@ dialog .plot {
   .shell {padding:10px}
   .details-action {flex-wrap:wrap}
 }
+
+.tn-card {
+  --tn-thumb: 14px;
+  margin-bottom: 14px;
+}
+.tn-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 8px;
+  margin-left: auto;
+  font-size: 12px;
+  color: #455969;
+}
+.tn-controls label[for="n-speed-span"] {
+  margin-left: 8px;
+}
+.tn-plot {
+  display: block;
+  width: 100%;
+  height: clamp(154px, 21vh, 252px);
+}
+.tn-slider input {
+  display: block;
+  width: calc(100% - var(--tn-left) - var(--tn-right) + var(--tn-thumb));
+  height: 26px;
+  margin: 0 calc(var(--tn-right) - var(--tn-thumb) / 2) 4px calc(var(--tn-left) - var(--tn-thumb) / 2);
+  padding: 0;
+  appearance: none;
+  background: linear-gradient(to right, #1e9685 0%, #1e9685 var(--pct), #dce4e9 var(--pct), #dce4e9 100%) no-repeat center / calc(100% - var(--tn-thumb)) 4px;
+  touch-action: pan-y;
+}
+.tn-slider input::-webkit-slider-thumb {
+  width: var(--tn-thumb);
+  height: var(--tn-thumb);
+}
+.tn-slider input::-moz-range-thumb {
+  box-sizing: border-box;
+  width: var(--tn-thumb);
+  height: var(--tn-thumb);
+  border: 2px solid #1a8d7f;
+  border-radius: 50%;
+  background: #fff;
+}
+.tn-legend {
+  min-height: 36px;
+}
+.tn-legend .tn-marker {
+  width: 7px;
+  height: 7px;
+  border: 0;
+  border-radius: 50%;
+  background: #16796b;
+}
+.tn-legend #tn-status:empty {
+  display: none;
+}
+@media (pointer: coarse) {
+  .tn-card { --tn-thumb: 25px; }
+  .tn-controls .number { min-height: 44px; }
+  .tn-slider input { height: 44px; }
+}
+@media (pointer:coarse) and (orientation:portrait), (pointer:coarse) and (max-width:960px) {
+  .tn-card { margin-bottom: 0; }
+}
+@media (max-width: 550px) {
+  .tn-card .card-head { flex-wrap: wrap; }
+  .tn-controls { width: 100%; }
+}

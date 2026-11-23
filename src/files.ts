@@ -18,6 +18,7 @@ export interface Project {
   o: Operation;
   rows: Row[];
   mapName: string;
+  speedRange?: number;
 }
 function csv(text: string) {
   const lines = text
@@ -185,12 +186,19 @@ export function readProject(text: string): Project {
     throw Error("工况数据无效");
   const pwm = p.pwm === undefined ? defaults.pwm : p.pwm;
   if (!pwmMethods.includes(pwm)) throw Error("项目调制方式无效");
+  const speedRange = v.speedRange;
+  if (
+    speedRange !== undefined &&
+    (!inRange(speedRange, "rpm") || speedRange < 1)
+  )
+    throw Error("项目横轴范围无效");
   return {
     name: v.name,
     p: { ...p, pwm },
     o: v.o,
     rows: v.rows,
     mapName: v.mapName,
+    speedRange,
   };
 }
 export function download(name: string, blob: Blob) {
