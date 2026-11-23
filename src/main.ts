@@ -19,7 +19,12 @@ import {
   download,
   type Row,
 } from "./files.ts";
-import { chart, inverterBoundaryColor, type Frame } from "./charts.ts";
+import {
+  chart,
+  inverterBoundaryColor,
+  mtpvColor,
+  type Frame,
+} from "./charts.ts";
 import type { Geometry } from "./geometry.ts";
 import { voltageComponents } from "./voltage.ts";
 import { math, mathHtml, mathCanvasLayout, type MathText } from "./notation.ts";
@@ -109,7 +114,7 @@ const voltageLegend = (parameters: Parameters) =>
   `<span><i style="--color:${inverterBoundaryColor}"></i>逆变器六边形</span>`;
 const legend = (kind: string) =>
   kind === "current"
-    ? '<span><i class="area"></i>可行域</span><span><i style="--color:#2963d9"></i>电流极限</span><span><i style="--color:#ce8740"></i>电压极限</span><span><i class="dash" style="--color:#9670ba"></i>等转矩线</span><span class="mtpa"><i class="dash" style="--color:#10988b"></i>MTPA</span><span class="no-data" hidden><i class="unmapped"></i>无数据</span>'
+    ? `<span><i class="area"></i>可行域</span><span><i style="--color:#2963d9"></i>电流极限</span><span><i style="--color:#ce8740"></i>电压极限</span><span><i class="dash" style="--color:#9670ba"></i>等转矩线</span><span class="mtpa"><i class="dash" style="--color:#10988b"></i>MTPA</span><span class="mtpv" hidden title="圆点对应当前电压限值，电流限值另行判断"><i class="dash" style="--color:${mtpvColor}"></i>MTPV</span><span class="no-data" hidden><i class="unmapped"></i>无数据</span>`
     : voltageLegend(frame?.p ?? p);
 const card = (key: string, title: string, ic: string, color: string) =>
   '<section class="card"><div class="card-head"><span class="icon-tile ' +
@@ -549,6 +554,9 @@ function graphs() {
   chart($("current"), "current", frame);
   chart($("voltage"), "voltage", frame);
   if (expanded && $("zoom")) chart($("zoom"), expanded, frame);
+  document
+    .querySelectorAll<HTMLElement>(".mtpv")
+    .forEach((el) => (el.hidden = frame!.g.mtpv === null));
 }
 const notes: Partial<Record<Result["status"], string>> = {
   unreachable:
@@ -1377,7 +1385,7 @@ async function action(a: string) {
     case "help":
       modal(
         "坐标约定与模型说明",
-        "<h3>输入与运行点</h3><p>转速为有符号机械转速。电流、电压均为相基波峰值。自动求点可按给定电磁转矩寻找最小电流。勾选「最大出力转矩」时，按当前转速和约束实时求最大出力，并显示电磁转矩乘机械角速度得到的机械转换功率。手动验点直接计算指定电流。P 表示选中的运行点或标明的边界点。</p><h3>稳态 dq 方程</h3><p>ω<sub>e</sub> = 2πpn / 60<br>V<sub>d</sub> = R<sub>s</sub>i<sub>d</sub> − ω<sub>e</sub>ψ<sub>q</sub>　　V<sub>q</sub> = R<sub>s</sub>i<sub>q</sub> + ω<sub>e</sub>ψ<sub>d</sub><br>T<sub>e</sub> = 1.5p (ψ<sub>d</sub>i<sub>q</sub> − ψ<sub>q</sub>i<sub>d</sub>)</p><h3>模型与约束</h3><p>默认使用常参数工程模型，并计入定子电阻。可关闭定子电阻或切换到理想模型进行对照。工程模型可按绕组温度修正铜阻，铜温度系数取 0.00393 / °C。磁链图以双线性插值计算总磁链。线性调制的相电压峰值上限，SVPWM 为 V<sub>dc</sub> / √3，SPWM 为 V<sub>dc</sub> / 2。常参数工程模型与磁链图模型可再乘以电压利用率 k<sub>v</sub>。直接给定电压上限时，求解使用输入的电压值。紫色六边形表示理想两电平逆变器可合成的平均电压范围，顶点幅值为 2V<sub>dc</sub> / 3。图中取转子电角度 0°，第一个顶点沿正 d 轴。橙色圆表示求解采用的电压限值。</p><h3>读图</h3><p>转矩–转速图默认显示零及正转矩，勾选「显示负转矩」即可查看完整包络。横轴默认随模型求得的可达转速边界调整，图下滑块与横轴同尺度。未找到有限边界时，横轴保留观察范围。可清空横轴范围输入框恢复自动估算。输入更高转速时横轴自动涵盖当前点。电流图的着色区域同时满足电流与电压约束。MTPA 是单位电流最大转矩轨迹。电压图将各项首尾相接，蓝色矢量是从原点指向合成端点的端电压。常参数模型依次连接永磁反电动势、电感电压和电阻压降。前两项的终点是旋转磁链电压。电感电压 V<sub>L</sub> 的 (d, q) 分量为 (−ω<sub>e</sub>L<sub>q</sub>i<sub>q</sub>, ω<sub>e</sub>L<sub>d</sub>i<sub>d</sub>)。磁链图模型使用当前工况的总磁链，显示 −ω<sub>e</sub>ψ<sub>q</sub> 在 d 轴上的分量和 ω<sub>e</sub>ψ<sub>d</sub> 在 q 轴上的分量。零值分量可在明细中查看。裕量等于极限减去实际幅值。</p><h3>工况回放</h3><p>导入 CSV 后点击表格行或播放。分析、回放和导出复用同一模型。示例电机与磁链数据用于方法验证。</p>",
+        "<h3>输入与运行点</h3><p>转速为有符号机械转速。电流、电压均为相基波峰值。自动求点可按给定电磁转矩寻找最小电流。勾选「最大出力转矩」时，按当前转速和约束实时求最大出力，并显示电磁转矩乘机械角速度得到的机械转换功率。手动验点直接计算指定电流。P 表示选中的运行点或标明的边界点。</p><h3>稳态 dq 方程</h3><p>ω<sub>e</sub> = 2πpn / 60<br>V<sub>d</sub> = R<sub>s</sub>i<sub>d</sub> − ω<sub>e</sub>ψ<sub>q</sub>　　V<sub>q</sub> = R<sub>s</sub>i<sub>q</sub> + ω<sub>e</sub>ψ<sub>d</sub><br>T<sub>e</sub> = 1.5p (ψ<sub>d</sub>i<sub>q</sub> − ψ<sub>q</sub>i<sub>d</sub>)</p><h3>模型与约束</h3><p>默认使用常参数工程模型，并计入定子电阻。可关闭定子电阻或切换到理想模型进行对照。工程模型可按绕组温度修正铜阻，铜温度系数取 0.00393 / °C。磁链图以双线性插值计算总磁链。线性调制的相电压峰值上限，SVPWM 为 V<sub>dc</sub> / √3，SPWM 为 V<sub>dc</sub> / 2。常参数工程模型与磁链图模型可再乘以电压利用率 k<sub>v</sub>。直接给定电压上限时，求解使用输入的电压值。紫色六边形表示理想两电平逆变器可合成的平均电压范围，顶点幅值为 2V<sub>dc</sub> / 3。图中取转子电角度 0°，第一个顶点沿正 d 轴。橙色圆表示求解采用的电压限值。</p><h3>读图</h3><p>转矩–转速图默认显示零及正转矩，勾选「显示负转矩」即可查看完整包络。横轴默认随模型求得的可达转速边界调整，图下滑块与横轴同尺度。未找到有限边界时，横轴保留观察范围。可清空横轴范围输入框恢复自动估算。输入更高转速时横轴自动涵盖当前点。电流图的着色区域同时满足电流与电压约束。MTPA 是单位电流最大转矩轨迹。MTPV 是固定转速下，各电压幅值对应的最大正、负转矩点的轨迹。圆点对应当前电压限值，仍需结合电流极限判断是否可达。常参数模型计入当前电阻设置，非零转速时显示 MTPV。电压图将各项首尾相接，蓝色矢量是从原点指向合成端点的端电压。常参数模型依次连接永磁反电动势、电感电压和电阻压降。前两项的终点是旋转磁链电压。电感电压 V<sub>L</sub> 的 (d, q) 分量为 (−ω<sub>e</sub>L<sub>q</sub>i<sub>q</sub>, ω<sub>e</sub>L<sub>d</sub>i<sub>d</sub>)。磁链图模型使用当前工况的总磁链，显示 −ω<sub>e</sub>ψ<sub>q</sub> 在 d 轴上的分量和 ω<sub>e</sub>ψ<sub>d</sub> 在 q 轴上的分量。零值分量可在明细中查看。裕量等于极限减去实际幅值。</p><h3>工况回放</h3><p>导入 CSV 后点击表格行或播放。分析、回放和导出复用同一模型。示例电机与磁链数据用于方法验证。</p>",
       );
       break;
   }

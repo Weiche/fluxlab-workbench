@@ -75,6 +75,7 @@ try {
   }
   await wait("status", "可行运行点");
   assert.equal(await text("m-torque"), "48.0");
+  assert.ok(await page.locator("#current + .legend .mtpv").isVisible());
   assert.equal(await page.locator("#model-choice").inputValue(), "engineering");
   assert.equal(await text("method"), "数值法");
   assert.ok(await page.getByLabel("计入定子电阻", { exact: true }).isChecked());
@@ -157,6 +158,7 @@ try {
   await page.locator("#model-choice").selectOption("map");
   await by("map-sample").click();
   await wait("status", "超出磁链图");
+  assert.ok(await page.locator("#current + .legend .mtpv").isHidden());
   assert.match(
     await page.locator("#voltage + .legend").innerText(),
     /q 轴磁链项/,
