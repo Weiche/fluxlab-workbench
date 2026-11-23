@@ -213,3 +213,34 @@ test("inverter hexagon starts on the positive d axis and contains the linear SVP
     assert.ok(vertices[1].q > 0);
   }
 });
+
+test("linear PWM limits drive feasibility and honor derating and direct override", () => {
+  const spwm = { ...defaults, pwm: "SPWM" };
+  close(limit(defaults), 260 / Math.sqrt(3));
+  close(limit(spwm), 130);
+  const op = { ...initial, mode: "manual", id: -27, iq: 78.3 };
+  assert.equal(solve(defaults, op).status, "ok");
+  assert.equal(solve(spwm, op).status, "over");
+  close(limit({ ...spwm, model: "engineering", useK: true }), 123.5);
+  close(limit({ ...spwm, direct: true, vmax: 140 }), 140);
+});
+
+test("project files preserve PWM selection and older projects default to SVPWM", () => {
+  const v = {
+    version: 1,
+    name: "调制方式",
+    p: { ...defaults, pwm: "SPWM" },
+    o: initial,
+    rows: [],
+    mapName: "",
+  };
+  assert.equal(readProject(JSON.stringify(v)).p.pwm, "SPWM");
+  assert.equal(
+    readProject(JSON.stringify({ ...v, p: { ...v.p, pwm: undefined } })).p.pwm,
+    "SVPWM",
+  );
+  assert.throws(
+    () => readProject(JSON.stringify({ ...v, p: { ...v.p, pwm: "invalid" } })),
+    /调制方式/,
+  );
+});

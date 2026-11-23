@@ -22,7 +22,7 @@
 V<sub>d</sub> = R<sub>s</sub> i<sub>d</sub> − ω<sub>e</sub> ψ<sub>q</sub><br>
 V<sub>q</sub> = R<sub>s</sub> i<sub>q</sub> + ω<sub>e</sub> ψ<sub>d</sub><br>
 T<sub>e</sub> = 1.5 p (ψ<sub>d</sub> i<sub>q</sub> − ψ<sub>q</sub> i<sub>d</sub>)<br>
-V<sub>max</sub> = k<sub>v</sub> V<sub>dc</sub> / √3
+V<sub>max</sub> = k<sub>v</sub> V<sub>dc</sub> / √3（SVPWM）或 k<sub>v</sub> V<sub>dc</sub> / 2（SPWM）
 
 默认理想模型使用 ψ<sub>d</sub> = ψ<sub>f</sub> + L<sub>d</sub> i<sub>d</sub> 和 ψ<sub>q</sub> = L<sub>q</sub> i<sub>q</sub>，R<sub>s</sub> = 0。常参数工程模型可启用定子电阻、以 20 °C 为参考的铜阻温度修正及电压利用率，也可直接给定电压上限。
 

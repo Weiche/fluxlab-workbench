@@ -1,5 +1,6 @@
 import {
   defaults,
+  pwmMethods,
   initial,
   type FluxMap,
   type Operation,
@@ -181,7 +182,15 @@ export function readProject(text: string): Project {
     )
   )
     throw Error("工况数据无效");
-  return { name: v.name, p, o: v.o, rows: v.rows, mapName: v.mapName };
+  const pwm = p.pwm === undefined ? defaults.pwm : p.pwm;
+  if (!pwmMethods.includes(pwm)) throw Error("项目调制方式无效");
+  return {
+    name: v.name,
+    p: { ...p, pwm },
+    o: v.o,
+    rows: v.rows,
+    mapName: v.mapName,
+  };
 }
 export function download(name: string, blob: Blob) {
   const url = URL.createObjectURL(blob),

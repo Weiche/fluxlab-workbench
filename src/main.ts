@@ -4,6 +4,7 @@ import {
   defaults,
   initial,
   limit,
+  pwmMethods,
   statusText,
   type Parameters,
   type Operation,
@@ -85,7 +86,7 @@ const voltageLegend = (parameters: Parameters) =>
         `<span><i style="--color:${color}"></i>${label}</span>`,
     )
     .join("") +
-  '<span><i class="dash" style="--color:#ce8740"></i>计算电压限值</span>' +
+  `<span><i class="dash" style="--color:#ce8740"></i>${parameters.direct ? "给定电压限值" : parameters.pwm + " 电压限值"}</span>` +
   `<span><i style="--color:${inverterBoundaryColor}"></i>逆变器六边形</span>`;
 const legend = (kind: string) =>
   kind === "current"
@@ -293,7 +294,19 @@ function sidebar() {
     (map
       ? '<p class="note">磁链来自导入的 dq 查表数据。</p>'
       : field("ld") + field("lq") + field("psi"));
+  const modulation =
+    '<div class="field"><label for="pwm-method">调制方式</label><select id="pwm-method"' +
+    (p.direct ? " disabled" : "") +
+    ">" +
+    pwmMethods
+      .map(
+        (method) =>
+          `<option${method === p.pwm ? " selected" : ""}>${method}</option>`,
+      )
+      .join("") +
+    "</select></div>";
   const constraint =
+    modulation +
     range("vdc", 1, 800, 1) +
     (p.direct ? range("vmax", 1, 600, 1) : "") +
     range("imax", 1, 400, 1) +
@@ -481,9 +494,10 @@ function renderFrame() {
       )
       .join("");
   const legendElement = $("voltage").nextElementSibling!;
-  if (legendElement.getAttribute("data-model") !== v.model) {
+  const legendKey = `${v.model}/${v.direct ? "direct" : v.pwm}`;
+  if (legendElement.getAttribute("data-model") !== legendKey) {
     legendElement.innerHTML = voltageLegend(v);
-    legendElement.setAttribute("data-model", v.model);
+    legendElement.setAttribute("data-model", legendKey);
   }
   const margin = (
     name: string,
@@ -584,6 +598,11 @@ $("side").addEventListener("change", (e) => {
   if (el.dataset.flag) {
     p = { ...p, [el.dataset.flag]: el.checked };
     sidebar();
+    enqueue(true);
+    return;
+  }
+  if (el.id === "pwm-method") {
+    p = { ...p, pwm: el.value as Parameters["pwm"] };
     enqueue(true);
     return;
   }
@@ -903,6 +922,7 @@ function exportPng() {
         : "给定 " + op.id + ", " + op.iq + " A",
       statusText[r.status],
       r.method,
+      v.direct ? "给定电压限值" : v.pwm,
       "相峰值",
     ].join("   ·   "),
     24,
@@ -1150,7 +1170,7 @@ async function action(a: string) {
     case "help":
       modal(
         "坐标约定与模型说明",
-        "<h3>输入与运行点</h3><p>转速为有符号机械转速。电流、电压均为相基波峰值。自动求点寻找满足目标电磁转矩的最小电流，手动验点直接计算指定电流。P 表示选中的运行点或标明的边界点。</p><h3>稳态 dq 方程</h3><p>ω<sub>e</sub> = 2πpn / 60<br>V<sub>d</sub> = R<sub>s</sub>i<sub>d</sub> − ω<sub>e</sub>ψ<sub>q</sub>　　V<sub>q</sub> = R<sub>s</sub>i<sub>q</sub> + ω<sub>e</sub>ψ<sub>d</sub><br>T<sub>e</sub> = 1.5p (ψ<sub>d</sub>i<sub>q</sub> − ψ<sub>q</sub>i<sub>d</sub>)</p><h3>模型与约束</h3><p>理想模型使用常数电感与永磁体磁链，定子电阻为零。工程模型可启用铜阻和温度修正，铜温度系数取 0.00393 / °C。磁链图以双线性插值计算总磁链。线性 SVPWM 电压上限为 k<sub>v</sub>V<sub>dc</sub> / √3。紫色六边形表示理想两电平逆变器可合成的平均电压范围，顶点幅值为 2V<sub>dc</sub> / 3。图中取转子电角度 0°，第一个顶点沿正 d 轴。橙色圆表示求解采用的电压限值。</p><h3>读图</h3><p>电流图的着色区域同时满足电流与电压约束。MTPA 是单位电流最大转矩轨迹。电压图将各项首尾相接，蓝色矢量是从原点指向合成端点的端电压。常参数模型显示电阻压降、永磁反电动势和电感电压。电感电压 V<sub>L</sub> 的 (d, q) 分量为 (−ω<sub>e</sub>L<sub>q</sub>i<sub>q</sub>, ω<sub>e</sub>L<sub>d</sub>i<sub>d</sub>)。磁链图模型使用当前工况的总磁链，显示 −ω<sub>e</sub>ψ<sub>q</sub> 在 d 轴上的分量和 ω<sub>e</sub>ψ<sub>d</sub> 在 q 轴上的分量。零值分量可在明细中查看。裕量等于极限减去实际幅值。</p><h3>工况回放</h3><p>导入 CSV 后点击表格行或播放。分析、回放和导出复用同一模型。示例电机与磁链数据用于方法验证。</p>",
+        "<h3>输入与运行点</h3><p>转速为有符号机械转速。电流、电压均为相基波峰值。自动求点寻找满足目标电磁转矩的最小电流，手动验点直接计算指定电流。P 表示选中的运行点或标明的边界点。</p><h3>稳态 dq 方程</h3><p>ω<sub>e</sub> = 2πpn / 60<br>V<sub>d</sub> = R<sub>s</sub>i<sub>d</sub> − ω<sub>e</sub>ψ<sub>q</sub>　　V<sub>q</sub> = R<sub>s</sub>i<sub>q</sub> + ω<sub>e</sub>ψ<sub>d</sub><br>T<sub>e</sub> = 1.5p (ψ<sub>d</sub>i<sub>q</sub> − ψ<sub>q</sub>i<sub>d</sub>)</p><h3>模型与约束</h3><p>理想模型使用常数电感与永磁体磁链，定子电阻为零。工程模型可启用铜阻和温度修正，铜温度系数取 0.00393 / °C。磁链图以双线性插值计算总磁链。线性调制的相电压峰值上限，SVPWM 为 V<sub>dc</sub> / √3，SPWM 为 V<sub>dc</sub> / 2。常参数工程模型与磁链图模型可再乘以电压利用率 k<sub>v</sub>。直接给定电压上限时，求解使用输入的电压值。紫色六边形表示理想两电平逆变器可合成的平均电压范围，顶点幅值为 2V<sub>dc</sub> / 3。图中取转子电角度 0°，第一个顶点沿正 d 轴。橙色圆表示求解采用的电压限值。</p><h3>读图</h3><p>电流图的着色区域同时满足电流与电压约束。MTPA 是单位电流最大转矩轨迹。电压图将各项首尾相接，蓝色矢量是从原点指向合成端点的端电压。常参数模型显示电阻压降、永磁反电动势和电感电压。电感电压 V<sub>L</sub> 的 (d, q) 分量为 (−ω<sub>e</sub>L<sub>q</sub>i<sub>q</sub>, ω<sub>e</sub>L<sub>d</sub>i<sub>d</sub>)。磁链图模型使用当前工况的总磁链，显示 −ω<sub>e</sub>ψ<sub>q</sub> 在 d 轴上的分量和 ω<sub>e</sub>ψ<sub>d</sub> 在 q 轴上的分量。零值分量可在明细中查看。裕量等于极限减去实际幅值。</p><h3>工况回放</h3><p>导入 CSV 后点击表格行或播放。分析、回放和导出复用同一模型。示例电机与磁链数据用于方法验证。</p>",
       );
       break;
   }

@@ -86,8 +86,19 @@ try {
     await page.locator("#voltage + .legend").innerText(),
     /逆变器六边形/,
   );
+  const pwm = page.getByLabel("调制方式", { exact: true });
+  assert.equal(await pwm.inputValue(), "SVPWM");
+  await pwm.selectOption("SPWM");
+  await wait("f-voltage", "130.0 V");
+  assert.match(
+    await page.locator("#voltage + .legend").innerText(),
+    /SPWM 电压限值/,
+  );
+  await pwm.selectOption("SVPWM");
+  await wait("f-voltage", "150.1 V");
   const directLimit = page.getByLabel("直接给定可用电压上限", { exact: true });
   await directLimit.check();
+  assert.ok(await pwm.isDisabled());
   assert.ok(await page.locator("#s-vdc").isVisible());
   assert.ok(await page.locator("#s-vmax").isVisible());
   await directLimit.uncheck();
