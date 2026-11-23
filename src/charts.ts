@@ -6,6 +6,7 @@ import {
 } from "./model.ts";
 import type { Geometry } from "./geometry.ts";
 import { voltageComponents } from "./voltage.ts";
+import { math, mathCanvasLayout, type MathText } from "./notation.ts";
 export interface Frame {
   p: Parameters;
   o: Operation;
@@ -76,7 +77,7 @@ export function chart(
     c.setLineDash([]);
   }
   function text(
-    t: string,
+    t: MathText,
     x: number,
     y: number,
     color = ink,
@@ -84,11 +85,27 @@ export function chart(
     align: CanvasTextAlign = "left",
     f = font,
   ) {
-    c.font = size + "px " + f;
     c.fillStyle = color;
-    c.textAlign = align;
     c.textBaseline = "middle";
-    c.fillText(t, x, y);
+    if (typeof t === "string") {
+      c.font = size + "px " + f;
+      c.textAlign = align;
+      c.fillText(t, x, y);
+      return;
+    }
+    const { width, runs } = mathCanvasLayout(c, t, f, size);
+    const start =
+      align === "right" ? x - width : align === "center" ? x - width / 2 : x;
+    c.textAlign = "left";
+    for (const run of runs) {
+      c.font = run.fontSpec;
+      c.fillText(run.text, start + run.x, y + run.y);
+    }
+  }
+  function captionWidth(t: MathText) {
+    if (typeof t !== "string") return mathCanvasLayout(c, t, font, 11).width;
+    c.font = "11px " + font;
+    return c.measureText(t).width;
   }
   function circle(
     x: number,
@@ -108,7 +125,7 @@ export function chart(
   }
   const labels: { x: number; y: number; w: number; h: number }[] = [];
   function label(
-    t: string,
+    t: MathText,
     x: number,
     y: number,
     color: string,
@@ -116,8 +133,7 @@ export function chart(
     dy: number,
     solid = false,
   ) {
-    c.font = "11px " + font;
-    const w = c.measureText(t).width + 11,
+    const w = captionWidth(t) + 11,
       h = 19;
     let u = Math.max(3, Math.min(W - w - 3, x + dx)),
       v = Math.max(3, Math.min(H - h - 3, y + dy));
@@ -300,8 +316,16 @@ export function chart(
     }
   }
   c.restore();
-  text(current ? "i_d (A)" : "u_d (V)", right, cy - 10, ink, 11, "right", mono);
-  text(current ? "i_q (A)" : "u_q (V)", cx + 9, top + 2, ink, 11, "left", mono);
+  const unit = current ? " (A)" : " (V)";
+  text(
+    [...(current ? math.id : math.vd), unit],
+    right,
+    cy - 10,
+    ink,
+    11,
+    "right",
+  );
+  text([...(current ? math.iq : math.vq), unit], cx + 9, top + 2);
   const boundary =
     r.status === "unreachable" ||
     r.status === "coverage" ||
@@ -318,7 +342,7 @@ export function chart(
         true,
       );
     label(
-      "Imax " + p.imax.toFixed(0) + " A",
+      [...math.imax, " " + p.imax.toFixed(0) + " A"],
       X(p.imax * 0.707),
       Y(-p.imax * 0.707),
       blue,
@@ -354,9 +378,12 @@ export function chart(
         }
       }
       label(
-        "Tₑ " +
-          (o.mode === "auto" ? o.torque : (pt?.torque ?? 0)).toFixed(1) +
-          " N·m",
+        [
+          ...math.te,
+          " " +
+            (o.mode === "auto" ? o.torque : (pt?.torque ?? 0)).toFixed(1) +
+            " N·m",
+        ],
         X(g.torque[k]),
         Y(g.torque[k + 1]),
         purple,
@@ -401,7 +428,7 @@ export function chart(
       label(
         [
           pt.im < 0 ? "ΔI " + pt.im.toFixed(1) + " A" : "",
-          pt.vm < 0 ? "ΔU " + pt.vm.toFixed(1) + " V" : "",
+          pt.vm < 0 ? "ΔV " + pt.vm.toFixed(1) + " V" : "",
         ]
           .filter(Boolean)
           .join("  "),
@@ -414,7 +441,7 @@ export function chart(
   } else {
     if (pt) {
       label(
-        "|u| " + pt.voltage.toFixed(1) + " V",
+        "|V| " + pt.voltage.toFixed(1) + " V",
         X(pt.ud),
         Y(pt.uq),
         blue,
@@ -430,8 +457,7 @@ export function chart(
           term.axis === "dq" ? Math.hypot(ud, uq) : term.axis === "d" ? ud : uq;
         const x = X((d + endD) / 2),
           y = Y((q + endQ) / 2);
-        const caption = term.symbol + " " + value.toFixed(1) + " V";
-        c.font = "11px " + font;
+        const caption = [...term.symbol, " " + value.toFixed(1) + " V"];
         const offset =
           term.axis === "dq"
             ? 12
@@ -439,12 +465,12 @@ export function chart(
               ? -38
               : uq > 0
                 ? 10
-                : -c.measureText(caption).width - 16;
+                : -captionWidth(caption) - 16;
         label(caption, x, y, term.color, offset, term.axis === "d" ? -24 : 6);
       }
     }
     label(
-      "Umax " + vlim.toFixed(1) + " V",
+      [...math.vmax, " " + vlim.toFixed(1) + " V"],
       X(vlim * 0.707),
       Y(-vlim * 0.707),
       orange,

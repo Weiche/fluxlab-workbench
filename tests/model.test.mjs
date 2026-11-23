@@ -11,6 +11,7 @@ import {
 } from "../src/model.ts";
 import { readMap, readBatch, readProject } from "../src/files.ts";
 import { voltageComponents } from "../src/voltage.ts";
+import { mathHtml } from "../src/notation.ts";
 const close = (a, b, e = 1e-5) =>
   assert.ok(Math.abs(a - b) <= e, `${a} != ${b}`);
 const run = (p = {}, op = {}) =>
@@ -180,8 +181,8 @@ test("flux-map voltage decomposition uses both total flux axes", () => {
   const rpm = -2400,
     x = point(p, rpm, 10, -5);
   const [drop, qFlux, dFlux] = voltageComponents(p, rpm, x);
-  assert.equal(qFlux.symbol, "−ωₑψq");
-  assert.equal(dFlux.symbol, "ωₑψd");
+  assert.equal(mathHtml(qFlux.symbol), "−ω<sub>e</sub>ψ<sub>q</sub>");
+  assert.equal(mathHtml(dFlux.symbol), "ω<sub>e</sub>ψ<sub>d</sub>");
   close(drop.ud + qFlux.ud, x.ud);
   close(drop.uq + dFlux.uq, x.uq);
   assert.ok(

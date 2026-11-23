@@ -76,6 +76,11 @@ try {
   await wait("status", "可行运行点");
   assert.equal(await text("m-torque"), "48.0");
   assert.match(await text("values"), /永磁反电动势/);
+  assert.match(
+    await page.locator("label[for=s-vdc]").innerHTML(),
+    /V<sub>dc<\/sub>/,
+  );
+  assert.match(await page.locator("#values").innerHTML(), /ψ<sub>f<\/sub>/);
   assert.match(await text("values"), /d 轴电流耦合.*-15.28/);
   await by("compare").click();
   await wait("dialog-body", "数值法");

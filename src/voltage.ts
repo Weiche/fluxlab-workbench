@@ -1,8 +1,9 @@
 import { omega, type Parameters, type Point } from "./model.ts";
+import { math, type MathRun } from "./notation.ts";
 
 export interface VoltageComponent {
   label: string;
-  symbol: string;
+  symbol: readonly MathRun[];
   color: string;
   axis: "d" | "q" | "dq";
   ud: number | undefined;
@@ -17,7 +18,7 @@ export function voltageComponents(
   const w = omega(p, rpm);
   const resistanceDrop: VoltageComponent = {
     label: "电阻压降",
-    symbol: "Rₛi",
+    symbol: [...math.rs, "i"],
     color: "#586879",
     axis: "dq",
     ud: point?.rd,
@@ -28,7 +29,7 @@ export function voltageComponents(
       resistanceDrop,
       {
         label: "q 轴磁链项",
-        symbol: "−ωₑψq",
+        symbol: ["−", ...math.omega, ...math.psiQ],
         color: "#117c70",
         axis: "d",
         ud: point?.ed,
@@ -36,7 +37,7 @@ export function voltageComponents(
       },
       {
         label: "d 轴磁链项",
-        symbol: "ωₑψd",
+        symbol: [...math.omega, ...math.psiD],
         color: "#8953a8",
         axis: "q",
         ud: point ? 0 : undefined,
@@ -49,7 +50,7 @@ export function voltageComponents(
     resistanceDrop,
     {
       label: "永磁反电动势",
-      symbol: "ωₑψf",
+      symbol: [...math.omega, ...math.psiF],
       color: "#a55919",
       axis: "q",
       ud: point ? 0 : undefined,
@@ -57,7 +58,7 @@ export function voltageComponents(
     },
     {
       label: "q 轴电流耦合",
-      symbol: "−ωₑLq·iq",
+      symbol: ["−", ...math.omega, ...math.lq, "·", ...math.iq],
       color: "#117c70",
       axis: "d",
       ud: point ? -w * ((p.lq * point.q) / 1000) : undefined,
@@ -65,7 +66,7 @@ export function voltageComponents(
     },
     {
       label: "d 轴电流耦合",
-      symbol: "ωₑLd·id",
+      symbol: [...math.omega, ...math.ld, "·", ...math.id],
       color: "#8953a8",
       axis: "q",
       ud: point ? 0 : undefined,
