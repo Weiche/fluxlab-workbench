@@ -4,6 +4,7 @@ import {
   defaults,
   initial,
   limit,
+  isMaxOutput,
   pwmMethods,
   statusText,
   type Parameters,
@@ -186,7 +187,7 @@ const symbols: Partial<Record<Key, MathText>> = {
   k: math.voltageUse,
 };
 const source = (k: Key) => (k in o ? o[k as "rpm"] : p[k as "ld"]);
-const num = (k: Key) =>
+const num = (k: Key, readOnly = false) =>
   '<div class="number"><input aria-label="' +
   labels[k] +
   '数值" id="n-' +
@@ -200,11 +201,11 @@ const num = (k: Key) =>
   '" max="' +
   bounds[k][1] +
   '" value="' +
-  source(k) +
-  '">' +
+  (readOnly ? "" : source(k)) +
+  (readOnly ? '" readonly>' : '">') +
   (unit[k] ? "<span>" + unit[k] + "</span>" : "") +
   "</div>";
-function field(k: Key) {
+function field(k: Key, readOnly = false) {
   return (
     '<div class="field"><label for="n-' +
     k +
@@ -213,7 +214,7 @@ function field(k: Key) {
     ' <i class="symbol">' +
     mathHtml(symbols[k] ?? "") +
     "</i></label>" +
-    num(k) +
+    num(k, readOnly) +
     "</div>"
   );
 }
@@ -278,7 +279,14 @@ const section = (key: string, title: string, ic: string, html: string) =>
   "</div></details>";
 function sidebar() {
   const mode = o.mode === "auto",
+    maxOutput = isMaxOutput(o),
     map = p.model === "map";
+  const torqueControl =
+    '<div><label class="check"><input id="max-output" type="checkbox"' +
+    (maxOutput ? " checked" : "") +
+    ">最大出力转矩</label>" +
+    (maxOutput ? field("torque", true) : range("torque", -120, 120, 0.5)) +
+    "</div>";
   const op =
     '<div class="segmented" aria-label="运行点给定方式"><button data-action="auto" class="' +
     (mode ? "sel" : "") +
@@ -287,7 +295,7 @@ function sidebar() {
     '">手动验点</button></div>' +
     range("rpm", -8000, 8000, 10) +
     (mode
-      ? range("torque", -120, 120, 0.5)
+      ? torqueControl
       : range("id", -p.imax, p.imax, 0.5) + range("iq", -p.imax, p.imax, 0.5));
   const motor =
     field("poles") +
@@ -330,13 +338,17 @@ function sidebar() {
           : "")
       : "") +
     '<div class="field"><label for="solver">求解器</label><select id="solver" ' +
-    (p.model !== "ideal" || !mode ? "disabled" : "") +
+    (p.model !== "ideal" || !mode || maxOutput ? "disabled" : "") +
     ">" +
     (mode
       ? '<option value="analytic" ' +
-        (p.model === "ideal" && p.solver === "analytic" ? "selected" : "") +
+        (p.model === "ideal" && !maxOutput && p.solver === "analytic"
+          ? "selected"
+          : "") +
         '>解析法</option><option value="numeric" ' +
-        (p.model !== "ideal" || p.solver === "numeric" ? "selected" : "") +
+        (p.model !== "ideal" || maxOutput || p.solver === "numeric"
+          ? "selected"
+          : "") +
         ">数值法</option>"
       : "<option>直接计算</option>") +
     "</select></div>" +
@@ -454,8 +466,16 @@ function renderFrame() {
   $("m-speed").textContent = op.rpm.toLocaleString("en-US", {
     maximumFractionDigits: 1,
   });
-  $("f-torque").textContent =
-    op.mode === "auto" ? "目标 " + f(op.torque, 1) + " N·m" : "由给定电流计算";
+  const maxOutput = isMaxOutput(op);
+  const power = x ? (x.torque * op.rpm * Math.PI) / 30000 : null;
+  if (maxOutput && isMaxOutput(o) && op.rpm === o.rpm) {
+    $<HTMLInputElement>("n-torque").value = x ? x.torque.toFixed(2) : "";
+  }
+  $("f-torque").textContent = maxOutput
+    ? "机械转换功率 " + f(power, 2) + " kW"
+    : op.mode === "auto"
+      ? "目标 " + f(op.torque, 1) + " N·m"
+      : "由给定电流计算";
   $("f-current").textContent = "极限 " + f(v.imax, 1) + " A";
   $("f-voltage").textContent = "极限 " + f(limit(v), 1) + " V";
   $("f-speed").textContent =
@@ -464,7 +484,8 @@ function renderFrame() {
   $("status").className = "status" + (r.status === "ok" ? "" : " warn");
   $("method").textContent = r.method;
   $("live").textContent = "实时求解";
-  $("compare-btn").hidden = v.model !== "ideal" || op.mode !== "auto";
+  $("compare-btn").hidden =
+    v.model !== "ideal" || op.mode !== "auto" || maxOutput;
   const val = (
     label: string,
     a: number | undefined,
@@ -521,8 +542,17 @@ function renderFrame() {
   $("margins").innerHTML =
     margin("电流裕量", x?.im, v.imax, "A", "") +
     margin("电压裕量", x?.vm, limit(v), "V", "blue");
-  $("state-note").hidden = !notes[r.status];
-  $("state-note").textContent = notes[r.status] ?? "";
+  let note = notes[r.status] ?? "";
+  if (maxOutput && r.status === "coverage")
+    note = "磁链图未覆盖完整电流范围，当前显示表内搜索结果。";
+  if (maxOutput && r.status === "ok") {
+    if (op.rpm === 0)
+      note = "零速时机械转换功率为零，图中显示最大正静态转矩点。";
+    else if (power != null && power <= 0)
+      note = "此转速和约束下可行点均无法产生正机械转换功率。";
+  }
+  $("state-note").hidden = !note;
+  $("state-note").textContent = note;
   document
     .querySelectorAll<HTMLElement>(".mtpa")
     .forEach((el) => (el.hidden = v.model === "map"));
@@ -593,6 +623,28 @@ $("side").addEventListener("change", (e) => {
       el.value = String(source(k));
     }
     sidebar();
+    return;
+  }
+  if (el.id === "max-output") {
+    const lastMax =
+      !dirty && !busy && frame && isMaxOutput(frame.o)
+        ? frame.r.point?.torque
+        : undefined;
+    const torque =
+      !el.checked &&
+      lastMax != null &&
+      lastMax >= bounds.torque[0] &&
+      lastMax <= bounds.torque[1]
+        ? lastMax
+        : o.torque;
+    o = { ...o, maxOutput: el.checked, torque };
+    if (tab === "batch") {
+      stop();
+      rowIndex = -1;
+      renderBatch();
+    }
+    sidebar();
+    enqueue();
     return;
   }
   if (el.dataset.flag) {
@@ -877,7 +929,11 @@ function exportCsv() {
           [
             op.mode,
             String(op.rpm),
-            op.mode === "auto" ? String(op.torque) : "",
+            op.mode === "auto"
+              ? String(
+                  isMaxOutput(op) ? (frame.r.point?.torque ?? "") : op.torque,
+                )
+              : "",
             op.mode === "manual" ? String(op.id) : "",
             op.mode === "manual" ? String(op.iq) : "",
           ],
@@ -917,9 +973,13 @@ function exportPng() {
     [
       modelNames[v.model],
       op.rpm + " rpm",
-      op.mode === "auto"
-        ? "目标 " + op.torque + " N·m"
-        : "给定 " + op.id + ", " + op.iq + " A",
+      isMaxOutput(op)
+        ? op.rpm === 0
+          ? "最大静态转矩"
+          : "最大出力"
+        : op.mode === "auto"
+          ? "目标 " + op.torque + " N·m"
+          : "给定 " + op.id + ", " + op.iq + " A",
       statusText[r.status],
       r.method,
       v.direct ? "给定电压限值" : v.pwm,
@@ -1170,7 +1230,7 @@ async function action(a: string) {
     case "help":
       modal(
         "坐标约定与模型说明",
-        "<h3>输入与运行点</h3><p>转速为有符号机械转速。电流、电压均为相基波峰值。自动求点寻找满足目标电磁转矩的最小电流，手动验点直接计算指定电流。P 表示选中的运行点或标明的边界点。</p><h3>稳态 dq 方程</h3><p>ω<sub>e</sub> = 2πpn / 60<br>V<sub>d</sub> = R<sub>s</sub>i<sub>d</sub> − ω<sub>e</sub>ψ<sub>q</sub>　　V<sub>q</sub> = R<sub>s</sub>i<sub>q</sub> + ω<sub>e</sub>ψ<sub>d</sub><br>T<sub>e</sub> = 1.5p (ψ<sub>d</sub>i<sub>q</sub> − ψ<sub>q</sub>i<sub>d</sub>)</p><h3>模型与约束</h3><p>默认使用常参数工程模型，并计入定子电阻。可关闭定子电阻或切换到理想模型进行对照。工程模型可按绕组温度修正铜阻，铜温度系数取 0.00393 / °C。磁链图以双线性插值计算总磁链。线性调制的相电压峰值上限，SVPWM 为 V<sub>dc</sub> / √3，SPWM 为 V<sub>dc</sub> / 2。常参数工程模型与磁链图模型可再乘以电压利用率 k<sub>v</sub>。直接给定电压上限时，求解使用输入的电压值。紫色六边形表示理想两电平逆变器可合成的平均电压范围，顶点幅值为 2V<sub>dc</sub> / 3。图中取转子电角度 0°，第一个顶点沿正 d 轴。橙色圆表示求解采用的电压限值。</p><h3>读图</h3><p>电流图的着色区域同时满足电流与电压约束。MTPA 是单位电流最大转矩轨迹。电压图将各项首尾相接，蓝色矢量是从原点指向合成端点的端电压。常参数模型依次连接永磁反电动势、电感电压和电阻压降。前两项的终点是旋转磁链电压。电感电压 V<sub>L</sub> 的 (d, q) 分量为 (−ω<sub>e</sub>L<sub>q</sub>i<sub>q</sub>, ω<sub>e</sub>L<sub>d</sub>i<sub>d</sub>)。磁链图模型使用当前工况的总磁链，显示 −ω<sub>e</sub>ψ<sub>q</sub> 在 d 轴上的分量和 ω<sub>e</sub>ψ<sub>d</sub> 在 q 轴上的分量。零值分量可在明细中查看。裕量等于极限减去实际幅值。</p><h3>工况回放</h3><p>导入 CSV 后点击表格行或播放。分析、回放和导出复用同一模型。示例电机与磁链数据用于方法验证。</p>",
+        "<h3>输入与运行点</h3><p>转速为有符号机械转速。电流、电压均为相基波峰值。自动求点可按给定电磁转矩寻找最小电流。勾选「最大出力转矩」时，按当前转速和约束实时求最大出力，并显示电磁转矩乘机械角速度得到的机械转换功率。手动验点直接计算指定电流。P 表示选中的运行点或标明的边界点。</p><h3>稳态 dq 方程</h3><p>ω<sub>e</sub> = 2πpn / 60<br>V<sub>d</sub> = R<sub>s</sub>i<sub>d</sub> − ω<sub>e</sub>ψ<sub>q</sub>　　V<sub>q</sub> = R<sub>s</sub>i<sub>q</sub> + ω<sub>e</sub>ψ<sub>d</sub><br>T<sub>e</sub> = 1.5p (ψ<sub>d</sub>i<sub>q</sub> − ψ<sub>q</sub>i<sub>d</sub>)</p><h3>模型与约束</h3><p>默认使用常参数工程模型，并计入定子电阻。可关闭定子电阻或切换到理想模型进行对照。工程模型可按绕组温度修正铜阻，铜温度系数取 0.00393 / °C。磁链图以双线性插值计算总磁链。线性调制的相电压峰值上限，SVPWM 为 V<sub>dc</sub> / √3，SPWM 为 V<sub>dc</sub> / 2。常参数工程模型与磁链图模型可再乘以电压利用率 k<sub>v</sub>。直接给定电压上限时，求解使用输入的电压值。紫色六边形表示理想两电平逆变器可合成的平均电压范围，顶点幅值为 2V<sub>dc</sub> / 3。图中取转子电角度 0°，第一个顶点沿正 d 轴。橙色圆表示求解采用的电压限值。</p><h3>读图</h3><p>电流图的着色区域同时满足电流与电压约束。MTPA 是单位电流最大转矩轨迹。电压图将各项首尾相接，蓝色矢量是从原点指向合成端点的端电压。常参数模型依次连接永磁反电动势、电感电压和电阻压降。前两项的终点是旋转磁链电压。电感电压 V<sub>L</sub> 的 (d, q) 分量为 (−ω<sub>e</sub>L<sub>q</sub>i<sub>q</sub>, ω<sub>e</sub>L<sub>d</sub>i<sub>d</sub>)。磁链图模型使用当前工况的总磁链，显示 −ω<sub>e</sub>ψ<sub>q</sub> 在 d 轴上的分量和 ω<sub>e</sub>ψ<sub>d</sub> 在 q 轴上的分量。零值分量可在明细中查看。裕量等于极限减去实际幅值。</p><h3>工况回放</h3><p>导入 CSV 后点击表格行或播放。分析、回放和导出复用同一模型。示例电机与磁链数据用于方法验证。</p>",
       );
       break;
   }

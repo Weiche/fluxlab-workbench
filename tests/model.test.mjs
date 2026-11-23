@@ -256,3 +256,40 @@ test("project files preserve PWM selection and older projects default to SVPWM",
     /调制方式/,
   );
 });
+
+test("maximum output follows speed direction and respects both limits", () => {
+  const p = defaults;
+  const op = { ...initial, maxOutput: true, torque: -1 };
+  const forward = solve(p, op);
+  const reverse = solve(p, { ...op, rpm: -op.rpm, torque: 1 });
+  assert.equal(forward.status, "ok");
+  assert.equal(reverse.status, "ok");
+  close(forward.point.torque, -reverse.point.torque);
+  close(forward.point.d, reverse.point.d);
+  close(forward.point.q, -reverse.point.q);
+  close(forward.point.im, 0);
+  close(forward.point.vm, 0);
+  const reducedVoltage = solve({ ...p, pwm: "SPWM" }, op);
+  assert.equal(reducedVoltage.status, "ok");
+  assert.ok(reducedVoltage.point.torque < forward.point.torque);
+  assert.ok(reducedVoltage.point.im >= -1e-6);
+  close(reducedVoltage.point.vm, 0);
+});
+
+test("maximum output reports zero-speed torque and incomplete map coverage", () => {
+  const op = { ...initial, maxOutput: true };
+  const stopped = solve(defaults, { ...op, rpm: 0 });
+  assert.equal(stopped.status, "ok");
+  assert.ok(stopped.point.torque > 0);
+  close(stopped.point.current, defaults.imax);
+  assert.equal(
+    solve({ ...defaults, imax: 10 }, { ...op, rpm: 9000 }).status,
+    "empty",
+  );
+
+  const map = readMap(mapText([-50, 0, 50]));
+  const partial = solve({ ...defaults, model: "map", map }, op);
+  assert.equal(partial.status, "coverage");
+  assert.ok(partial.point.current > 0);
+  assert.ok(partial.point.vm >= -1e-6);
+});

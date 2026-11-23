@@ -182,6 +182,38 @@ try {
   await wait("method", "数值法");
   assert.equal(await page.locator("#model-choice").inputValue(), "engineering");
   assert.ok(await page.getByLabel("计入定子电阻", { exact: true }).isChecked());
+  const maxOutput = page.getByRole("checkbox", { name: "最大出力转矩" });
+  const torque = page.locator("#n-torque");
+  assert.ok(!(await maxOutput.isChecked()));
+  await maxOutput.check();
+  await wait("f-torque", "23.05 kW");
+  assert.equal(await torque.inputValue(), "73.39");
+  assert.ok(await torque.evaluate((el) => el.readOnly));
+  assert.ok(await page.locator("#s-torque").isHidden());
+  const maxProject = await grab("save");
+  assert.equal(JSON.parse(maxProject).o.maxOutput, true);
+
+  await page.locator("#n-rpm").fill("-4500");
+  await page.locator("#n-rpm").press("Enter");
+  await wait("f-torque", "26.04 kW");
+  assert.equal(await torque.inputValue(), "-55.25");
+  await maxOutput.uncheck();
+  await wait("f-torque", "目标");
+  assert.ok(!(await torque.evaluate((el) => el.readOnly)));
+  assert.ok(Math.abs(Number(await torque.inputValue()) + 55.25) < 0.005);
+  assert.ok(await page.locator("#s-torque").isVisible());
+  await torque.fill("-25");
+  await torque.press("Enter");
+  await wait("m-torque", "-25.0");
+
+  await file("open", {
+    name: "max-output.json",
+    mimeType: "application/json",
+    buffer: maxProject,
+  });
+  await wait("f-torque", "23.05 kW");
+  assert.ok(await maxOutput.isChecked());
+  assert.equal(await torque.inputValue(), "73.39");
   assert.deepEqual(errors, []);
   console.log(
     "Passed interaction, dual solvers, map, overshoot, replay, invalid rows, PNG/CSV, project save/reopen and reset.",

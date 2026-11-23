@@ -27,6 +27,7 @@ export interface Parameters {
 }
 export interface Operation {
   mode: "auto" | "manual";
+  maxOutput?: boolean;
   rpm: number;
   torque: number;
   id: number;
@@ -69,6 +70,8 @@ export const resistance = (p: Parameters) =>
   p.model !== "ideal" && p.useR
     ? p.rs * (p.useTemp ? 1 + 0.00393 * (p.temperature - 20) : 1)
     : 0;
+export const isMaxOutput = (o: Operation) =>
+  o.mode === "auto" && o.maxOutput === true;
 export const omega = (p: Parameters, n: number) => (n * p.poles * Math.PI) / 30;
 export function cell(axis: number[], value: number) {
   let a = 0,
@@ -253,7 +256,11 @@ interface Slice {
 // squared voltage are quadratic, so each vertical section is solved exactly.
 function section(
   p: Parameters,
-  o: Operation,
+  {
+    rpm,
+    target,
+    direction,
+  }: { rpm: number; target?: number; direction: number },
   d: number,
   needEdge: boolean,
 ): Slice {
@@ -266,10 +273,9 @@ function section(
     edgeTorque = -Infinity;
   if (lo > hi) return { best: null, edge: null };
   const k = 1.5 * p.poles,
-    w = omega(p, o.rpm),
+    w = omega(p, rpm),
     r = resistance(p),
-    V = limit(p),
-    dir = o.torque < 0 ? -1 : 1;
+    V = limit(p);
   const start = m ? cell(m.q, lo) : 0,
     end = m ? cell(m.q, hi) : 0;
   const i = m ? cell(m.d, d) : 0,
@@ -293,15 +299,15 @@ function section(
     const a = k * bd,
       b = k * (ad - bq * d),
       c = -k * aq * d;
-    if (!needEdge) {
+    if (!needEdge && target !== undefined) {
       const left = (a * l + b) * l + c,
         right = (a * h + b) * h + c;
       const vertex = a !== 0 ? -b / (2 * a) : NaN;
       const middle =
         vertex > l && vertex < h ? (a * vertex + b) * vertex + c : left;
       if (
-        o.torque < Math.min(left, right, middle) - eps ||
-        o.torque > Math.max(left, right, middle) + eps
+        target < Math.min(left, right, middle) - eps ||
+        target > Math.max(left, right, middle) + eps
       )
         continue;
     }
@@ -319,31 +325,34 @@ function section(
       h = Math.min(h, z.at(-1)!);
     } else if (C > eps) continue;
     if (l > h + eps) continue;
-    const z = quadratic(a, b, c - o.torque);
-    if (Math.abs(a) + Math.abs(b) < 1e-14 && Math.abs(c - o.torque) < eps)
-      z.push(Math.min(h, Math.max(l, 0)));
-    for (const q of z) {
-      if (q < l - eps || q > h + eps) continue;
-      if (!Number.isFinite(bestQ) || Math.abs(q) < Math.abs(bestQ))
-        bestQ = Math.max(lo, Math.min(hi, q));
+    if (target !== undefined) {
+      const z = quadratic(a, b, c - target);
+      if (Math.abs(a) + Math.abs(b) < 1e-14 && Math.abs(c - target) < eps)
+        z.push(Math.min(h, Math.max(l, 0)));
+      for (const q of z) {
+        if (q < l - eps || q > h + eps) continue;
+        if (!Number.isFinite(bestQ) || Math.abs(q) < Math.abs(bestQ))
+          bestQ = Math.max(lo, Math.min(hi, q));
+      }
     }
     if (!needEdge) continue;
     for (const q of [l, h, ...(a !== 0 ? [-b / (2 * a)] : [])]) {
       if (q < l - eps || q > h + eps) continue;
-      const t = dir * ((a * q + b) * q + c);
+      const t = direction * ((a * q + b) * q + c);
       if (t > edgeTorque) {
         edgeTorque = t;
         edgeQ = Math.max(lo, Math.min(hi, q));
       }
     }
   }
-  const best = Number.isFinite(bestQ) ? point(p, o.rpm, d, bestQ) : null,
-    edge = Number.isFinite(edgeQ) ? point(p, o.rpm, d, edgeQ) : null;
+  const best = Number.isFinite(bestQ) ? point(p, rpm, d, bestQ) : null,
+    edge = Number.isFinite(edgeQ) ? point(p, rpm, d, edgeQ) : null;
   return {
     best:
+      target !== undefined &&
       best &&
       feasible(p, best) &&
-      Math.abs(best.torque - o.torque) < 1e-6 * (1 + Math.abs(o.torque))
+      Math.abs(best.torque - target) < 1e-6 * (1 + Math.abs(target))
         ? best
         : null,
     edge: edge && feasible(p, edge) ? edge : null,
@@ -460,14 +469,20 @@ function excludedTarget(p: Parameters, o: Operation) {
 }
 function numerical(p: Parameters, o: Operation): Result {
   const m = p.model === "map" ? p.map : null,
-    dir = o.torque < 0 ? -1 : 1;
+    maxOutput = isMaxOutput(o),
+    dir = (maxOutput ? o.rpm : o.torque) < 0 ? -1 : 1;
+  const request = {
+    rpm: o.rpm,
+    target: maxOutput ? undefined : o.torque,
+    direction: dir,
+  };
   const low = Math.max(-p.imax, m?.d[0] ?? -Infinity),
     high = Math.min(p.imax, m?.d.at(-1) ?? Infinity);
   let best: Point | null = null,
     edge: Point | null = null;
   let needEdge = false;
   const inspect = (d: number) => {
-    const s = section(p, o, d, needEdge);
+    const s = section(p, request, d, needEdge);
     if (s.best && (!best || s.best.current < best.current)) best = s.best;
     if (s.edge && (!edge || dir * s.edge.torque > dir * edge.torque))
       edge = s.edge;
@@ -500,7 +515,8 @@ function numerical(p: Parameters, o: Operation): Result {
     }
     inspect((l + h) / 2);
   };
-  for (const kind of ["best", "edge"] as const) {
+  const passes = maxOutput ? (["edge"] as const) : (["best", "edge"] as const);
+  for (const kind of passes) {
     if (kind === "edge" && best) break;
     needEdge = kind === "edge";
     const scores = grid.map((d) => score(inspect(d), kind));
@@ -538,6 +554,12 @@ function numerical(p: Parameters, o: Operation): Result {
       m.q[0] > -p.imax ||
       m.d.at(-1)! < p.imax ||
       m.q.at(-1)! < p.imax);
+  if (maxOutput)
+    return {
+      point: e,
+      status: partial ? "coverage" : e ? "ok" : m ? "unresolved" : "empty",
+      method: "数值法",
+    };
   if (b) return { point: b, status: "ok", method: "数值法" };
   if (e && Math.abs(e.torque - o.torque) < 1e-7 * (1 + Math.abs(o.torque)))
     return { point: e, status: "ok", method: "数值法" };
@@ -561,7 +583,7 @@ export function solve(p: Parameters, o: Operation): Result {
       method: "直接计算",
     };
   }
-  if (p.model === "ideal" && p.solver === "analytic") {
+  if (!isMaxOutput(o) && p.model === "ideal" && p.solver === "analytic") {
     const x = analytic(p, o);
     if (x) return { point: x, status: "ok", method: "解析法" };
     const r = numerical(p, o);
