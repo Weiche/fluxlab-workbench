@@ -12,6 +12,7 @@ import {
 import { readMap, readBatch, readProject } from "../src/files.ts";
 import { inverterHexagonAtZero, voltageComponents } from "../src/voltage.ts";
 import { mathHtml } from "../src/notation.ts";
+import { mtpvTrajectory } from "../src/mtpv.ts";
 const close = (a, b, e = 1e-5) =>
   assert.ok(Math.abs(a - b) <= e, `${a} != ${b}`);
 const ideal = { ...defaults, model: "ideal" };
@@ -255,4 +256,52 @@ test("project files preserve PWM selection and older projects default to SVPWM",
     () => readProject(JSON.stringify({ ...v, p: { ...v.p, pwm: "invalid" } })),
     /调制方式/,
   );
+});
+
+test("MTPV markers maximize signed torque on the voltage boundary with winding resistance", () => {
+  for (const rpm of [-6500, 6500]) {
+    const p = { ...defaults, pwm: "SPWM", useTemp: true, imax: 30 };
+    const trajectory = mtpvTrajectory(p, rpm, 400, 300);
+    const max = point(
+      p,
+      rpm,
+      trajectory.atLimit.positive.d,
+      trajectory.atLimit.positive.q,
+    );
+    const min = point(
+      p,
+      rpm,
+      trajectory.atLimit.negative.d,
+      trajectory.atLimit.negative.q,
+    );
+    const radius = limit(p);
+    close(max.voltage, radius);
+    close(min.voltage, radius);
+    assert.ok(max.current > p.imax);
+    const r = resistance(p),
+      w = omega(p, rpm);
+    const xd = (w * p.ld) / 1000,
+      xq = (w * p.lq) / 1000;
+    for (let angle = 0; angle < 2 * Math.PI; angle += 0.0025) {
+      const vd = radius * Math.cos(angle),
+        vq = radius * Math.sin(angle) - w * p.psi;
+      const d = (r * vd + xq * vq) / (r * r + xd * xq),
+        q = (-xd * vd + r * vq) / (r * r + xd * xq);
+      const sample = point(p, rpm, d, q);
+      assert.ok(sample.torque <= max.torque + 1e-6);
+      assert.ok(sample.torque >= min.torque - 1e-6);
+    }
+  }
+});
+
+test("ideal surface motor MTPV holds the d-axis flux at zero", () => {
+  const p = { ...ideal, lq: ideal.ld };
+  const result = mtpvTrajectory(p, 6000, 400, 300);
+  for (const branch of [result.positive, result.negative]) {
+    for (const x of branch) close(x.d, (-1000 * p.psi) / p.ld, 0.001);
+  }
+  assert.ok(result.atLimit.positive.q > 0);
+  assert.ok(result.atLimit.negative.q < 0);
+  assert.equal(mtpvTrajectory(p, 0, 400, 300), null);
+  assert.equal(mtpvTrajectory({ ...p, model: "map" }, 6000, 400, 300), null);
 });

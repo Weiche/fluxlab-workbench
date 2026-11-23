@@ -1,4 +1,5 @@
 import { flux, resistance, omega, limit, type Parameters } from "./model.ts";
+import { mtpvTrajectory, type Mtpv } from "./mtpv.ts";
 export interface Geometry {
   extent: number;
   xExtent: number;
@@ -7,6 +8,7 @@ export interface Geometry {
   mask: Uint8Array;
   voltage: number[];
   torque: number[];
+  mtpv: Mtpv | null;
 }
 function contour(
   field: Float64Array,
@@ -71,6 +73,7 @@ function fields(p: Parameters, extent: number, ratio: number, height: number) {
     fq,
     rpm: NaN,
     voltage: [] as number[],
+    mtpv: null as Mtpv | null,
     mask: new Uint8Array(height * width),
   };
 }
@@ -123,6 +126,7 @@ export function geometry(
             : 0;
       }
     g.voltage = contour(voltage, 0, width, height, xExtent, extent);
+    g.mtpv = mtpvTrajectory(p, rpm, xExtent, extent);
     g.rpm = rpm;
   }
   return {
@@ -132,6 +136,7 @@ export function geometry(
     height,
     mask: g.mask,
     voltage: g.voltage,
+    mtpv: g.mtpv,
     torque: contour(g.torque, target, width, height, xExtent, extent),
   };
 }
