@@ -48,7 +48,7 @@ export const defaults: Parameters = {
   vdc: 260,
   vmax: 150,
   imax: 120,
-  model: "ideal",
+  model: "engineering",
   solver: "analytic",
   map: null,
 };

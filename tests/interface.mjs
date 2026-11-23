@@ -75,6 +75,10 @@ try {
   }
   await wait("status", "可行运行点");
   assert.equal(await text("m-torque"), "48.0");
+  assert.equal(await page.locator("#model-choice").inputValue(), "engineering");
+  assert.equal(await text("method"), "数值法");
+  assert.ok(await page.getByLabel("计入定子电阻", { exact: true }).isChecked());
+  assert.match(await text("values"), /电阻压降.*-1.22.*3.52/);
   assert.match(await text("values"), /永磁反电动势/);
   assert.match(
     await page.locator("label[for=s-vdc]").innerHTML(),
@@ -102,6 +106,9 @@ try {
   assert.ok(await page.locator("#s-vdc").isVisible());
   assert.ok(await page.locator("#s-vmax").isVisible());
   await directLimit.uncheck();
+  await page.locator("#model-choice").selectOption("ideal");
+  await wait("method", "解析法");
+  assert.match(await text("values"), /电阻压降.*0.00.*0.00/);
   await by("compare").click();
   await wait("dialog-body", "数值法");
   await by("close").click();
@@ -141,6 +148,7 @@ try {
   });
   await wait("status", "超出约束");
   assert.equal(await page.locator("#n-iq").inputValue(), "155");
+  assert.equal(await page.locator("#model-choice").inputValue(), "ideal");
   await by("batch").click();
   await by("sample").click();
   await wait("batch-list", "目标不可达");
@@ -164,12 +172,12 @@ try {
   await by("next").click();
   await wait("m-torque", "24.0");
   await by("analysis").click();
-  await page.locator("#model-choice").selectOption("engineering");
-  await wait("method", "数值法");
   await by("reset").click();
   await by("confirm-reset").click();
   await wait("m-torque", "48.0");
-  await wait("method", "解析法");
+  await wait("method", "数值法");
+  assert.equal(await page.locator("#model-choice").inputValue(), "engineering");
+  assert.ok(await page.getByLabel("计入定子电阻", { exact: true }).isChecked());
   assert.deepEqual(errors, []);
   console.log(
     "Passed interaction, dual solvers, map, overshoot, replay, invalid rows, PNG/CSV, project save/reopen and reset.",

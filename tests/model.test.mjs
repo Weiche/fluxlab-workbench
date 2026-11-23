@@ -14,8 +14,18 @@ import { inverterHexagonAtZero, voltageComponents } from "../src/voltage.ts";
 import { mathHtml } from "../src/notation.ts";
 const close = (a, b, e = 1e-5) =>
   assert.ok(Math.abs(a - b) <= e, `${a} != ${b}`);
+const ideal = { ...defaults, model: "ideal" };
 const run = (p = {}, op = {}) =>
-  solve({ ...defaults, ...p }, { ...initial, ...op });
+  solve({ ...ideal, ...p }, { ...initial, ...op });
+test("the default example solves with winding resistance", () => {
+  const { point: x, method, status } = solve(defaults, initial);
+  assert.equal(defaults.model, "engineering");
+  assert.equal(status, "ok");
+  assert.equal(method, "数值法");
+  close(resistance(defaults), 0.045);
+  close(Math.hypot(x.rd, x.rq), defaults.rs * x.current);
+  assert.ok(x.voltage > solve(ideal, initial).point.voltage);
+});
 test("surface PMSM uses iq = T / (1.5 p ψ), id = 0 at base speed", () => {
   const r = run({ ld: 0.9 }, { rpm: 450 });
   assert.equal(r.status, "ok");
@@ -146,7 +156,7 @@ test("nonlinear flux data changes the voltage contour and matches requested torq
     x = run(p, { torque: 40 });
   assert.equal(x.status, "ok");
   close(x.point.torque, 40);
-  const ref = point(defaults, 3200, -75, 75),
+  const ref = point(ideal, 3200, -75, 75),
     sat = point(p, 3200, -75, 75);
   assert.ok(Math.abs(ref.voltage - sat.voltage) > 1);
   assert.equal(run(p, { torque: 500 }).status, "unreachable");
