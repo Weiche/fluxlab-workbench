@@ -19,6 +19,7 @@ const blue = "#2963d9",
   orange = "#ce8740",
   purple = "#9670ba",
   ink = "#23344a";
+export const mtpvColor = "#a43b65";
 export const inverterBoundaryColor = "#7255a5";
 const font = '"Inter","Segoe UI","Noto Sans CJK SC",sans-serif';
 const grid = "#e5eaf0",
@@ -256,6 +257,34 @@ export function chart(
     };
     segments(g.voltage, orange, false);
     segments(g.torque, purple, true);
+    if (g.mtpv) {
+      for (const branch of [g.mtpv.positive, g.mtpv.negative]) {
+        let coords: number[] = [];
+        for (const { d, q } of branch) {
+          const x = X(d),
+            y = Y(q);
+          const px = coords.at(-2),
+            py = coords.at(-1);
+          if (
+            px !== undefined &&
+            py !== undefined &&
+            Math.hypot(x - px, y - py) > 0.35 * Math.min(W, H)
+          ) {
+            if (coords.length > 2) path(coords, mtpvColor, 1.8, [7, 3, 2, 3]);
+            coords = [];
+          }
+          coords.push(x, y);
+        }
+        if (coords.length > 2) path(coords, mtpvColor, 1.8, [7, 3, 2, 3]);
+      }
+      for (const { d, q } of Object.values(g.mtpv.atLimit)) {
+        c.fillStyle = "#fff";
+        c.beginPath();
+        c.arc(X(d), Y(q), 3.8, 0, 2 * Math.PI);
+        c.fill();
+        circle(X(d), Y(q), 3.8, mtpvColor, 1.8);
+      }
+    }
     if (p.model !== "map") {
       const delta = (p.ld - p.lq) / 1000,
         coords: number[] = [];
@@ -444,6 +473,26 @@ export function chart(
           (2 * delta * q * q) /
           (p.psi + Math.sqrt(p.psi * p.psi + 4 * delta * delta * q * q));
       label("MTPA", X(d), Y(q), teal, -40, 7);
+    }
+    if (g.mtpv) {
+      const negative = (pt?.torque ?? o.torque) < 0;
+      const branch = negative ? g.mtpv.negative : g.mtpv.positive;
+      const marker = negative
+        ? g.mtpv.atLimit.negative
+        : g.mtpv.atLimit.positive;
+      const visible = ({ d, q }: { d: number; q: number }) =>
+        X(d) > left + 8 &&
+        X(d) < right - 8 &&
+        Y(q) > top + 8 &&
+        Y(q) < bottom - 8;
+      const anchor =
+        visible(marker)
+          ? marker
+          : (branch.slice().reverse().find(visible) ??
+            g.mtpv.positive.find(visible) ??
+            g.mtpv.negative.find(visible));
+      if (anchor) label("MTPV", X(anchor.d), Y(anchor.q), mtpvColor, 9, -24);
+      else text("MTPV 在当前视窗外", left + 4, bottom - 12, mtpvColor);
     }
     if (pt && r.status === "over")
       label(
