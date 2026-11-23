@@ -7,6 +7,7 @@ export const math = {
   iq: ["i", sub("q")],
   vd: ["V", sub("d")],
   vq: ["V", sub("q")],
+  vl: ["V", sub("L")],
   vdc: ["V", sub("dc")],
   vmax: ["V", sub("max")],
   imax: ["I", sub("max")],

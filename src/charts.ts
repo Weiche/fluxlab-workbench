@@ -457,7 +457,11 @@ export function chart(
           term.axis === "dq" ? Math.hypot(ud, uq) : term.axis === "d" ? ud : uq;
         const x = X((d + endD) / 2),
           y = Y((q + endQ) / 2);
-        const caption = [...term.symbol, " " + value.toFixed(1) + " V"];
+        const reading = " " + value.toFixed(1) + " V";
+        const caption =
+          term.axis === "dq"
+            ? ["|", ...term.symbol, "|" + reading]
+            : [...term.symbol, reading];
         const offset =
           term.axis === "dq"
             ? 12

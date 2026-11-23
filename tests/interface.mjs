@@ -81,7 +81,7 @@ try {
     /V<sub>dc<\/sub>/,
   );
   assert.match(await page.locator("#values").innerHTML(), /ψ<sub>f<\/sub>/);
-  assert.match(await text("values"), /d 轴电流耦合.*-15.28/);
+  assert.match(await text("values"), /电感电压.*-88.57.*-15.28/);
   await by("compare").click();
   await wait("dialog-body", "数值法");
   await by("close").click();
@@ -102,7 +102,7 @@ try {
   assert.ok(await page.locator("#zoom").isVisible());
   assert.match(
     await page.locator("#zoom + .legend").innerText(),
-    /q 轴电流耦合/,
+    /电感电压/,
   );
   await by("close").click();
   await page.locator("#model-choice").selectOption("map");

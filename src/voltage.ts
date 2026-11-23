@@ -57,19 +57,11 @@ export function voltageComponents(
       uq: point ? w * p.psi : undefined,
     },
     {
-      label: "q 轴电流耦合",
-      symbol: ["−", ...math.omega, ...math.lq, "·", ...math.iq],
+      label: "电感电压",
+      symbol: math.vl,
       color: "#117c70",
-      axis: "d",
+      axis: "dq",
       ud: point ? -w * ((p.lq * point.q) / 1000) : undefined,
-      uq: point ? 0 : undefined,
-    },
-    {
-      label: "d 轴电流耦合",
-      symbol: [...math.omega, ...math.ld, "·", ...math.id],
-      color: "#8953a8",
-      axis: "q",
-      ud: point ? 0 : undefined,
       uq: point ? w * ((p.ld * point.d) / 1000) : undefined,
     },
   ];
