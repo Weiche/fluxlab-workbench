@@ -75,6 +75,8 @@ try {
   }
   await wait("status", "可行运行点");
   assert.equal(await text("m-torque"), "48.0");
+  assert.match(await text("values"), /永磁反电动势/);
+  assert.match(await text("values"), /d 轴电流耦合.*-15.28/);
   await by("compare").click();
   await wait("dialog-body", "数值法");
   await by("close").click();
@@ -93,10 +95,19 @@ try {
   assert.equal((await grab("png")).subarray(1, 4).toString(), "PNG");
   await by("expand-voltage").click();
   assert.ok(await page.locator("#zoom").isVisible());
+  assert.match(
+    await page.locator("#zoom + .legend").innerText(),
+    /q 轴电流耦合/,
+  );
   await by("close").click();
   await page.locator("#model-choice").selectOption("map");
   await by("map-sample").click();
   await wait("status", "超出磁链图");
+  assert.match(
+    await page.locator("#voltage + .legend").innerText(),
+    /q 轴磁链项/,
+  );
+  assert.match(await text("values"), /d 轴磁链项/);
   await file("open", {
     name: "saved.json",
     mimeType: "application/json",

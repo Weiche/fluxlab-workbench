@@ -5,6 +5,7 @@ import {
   type Result,
 } from "./model.ts";
 import type { Geometry } from "./geometry.ts";
+import { voltageComponents } from "./voltage.ts";
 export interface Frame {
   p: Parameters;
   o: Operation;
@@ -38,14 +39,22 @@ export function chart(
   c.setTransform(dpr, 0, 0, dpr, 0, 0);
   c.fillStyle = "#fff";
   c.fillRect(0, 0, W, H);
-  const current = kind === "current",
-    ext = current
-      ? g.extent
-      : Math.max(
-          limit(p),
-          pt?.voltage ?? 0,
-          Math.hypot(pt?.rd ?? 0, pt?.rq ?? 0),
-        ) * 1.28;
+  const current = kind === "current";
+  const voltageSegments = [];
+  let voltageExtent = Math.max(limit(p), pt?.voltage ?? 0);
+  if (!current && pt) {
+    let d = 0,
+      q = 0;
+    for (const term of voltageComponents(p, o.rpm, pt)) {
+      const endD = d + (term.ud ?? 0),
+        endQ = q + (term.uq ?? 0);
+      voltageSegments.push({ term, d, q, endD, endQ });
+      voltageExtent = Math.max(voltageExtent, Math.hypot(endD, endQ));
+      d = endD;
+      q = endQ;
+    }
+  }
+  const ext = current ? g.extent : voltageExtent * 1.28;
   const cx = W / 2,
     cy = H / 2 + 2,
     s = Math.min((W - 60) / (2 * ext), (H - 35) / (2 * ext));
@@ -249,10 +258,11 @@ export function chart(
       color: string,
       lw: number,
     ) {
-      if (Math.hypot(u - x, v - y) < 2) return;
+      const length = Math.hypot(u - x, v - y);
+      if (length < 2) return;
       path([x, y, u, v], color, lw);
       const a = Math.atan2(v - y, u - x),
-        len = 8;
+        len = Math.min(8, length * 0.75);
       c.fillStyle = color;
       c.beginPath();
       c.moveTo(u, v);
@@ -278,16 +288,15 @@ export function chart(
         1,
         [3, 4],
       );
-      arrow(cx, cy, X(pt.ud), cy, purple, 2);
-      arrow(X(pt.ud), cy, X(pt.ud), Y(pt.uq), teal, 2);
-      arrow(cx, cy, X(pt.rd), Y(pt.rq), orange, 2.5);
-      if (Math.hypot(pt.rd, pt.rq) * s > 1)
-        arrow(X(pt.rd), Y(pt.rq), X(pt.ud), Y(pt.uq), teal, 2);
-      arrow(cx, cy, X(pt.ud), Y(pt.uq), blue, 2.7);
+      arrow(cx, cy, X(pt.ud), Y(pt.uq), blue, 3.8);
+      circle(X(pt.ud), Y(pt.uq), 3.5, blue, 1.5);
       c.fillStyle = ink;
       c.beginPath();
-      c.arc(cx, cy, 3, 0, 2 * Math.PI);
+      c.arc(cx, cy, 2.5, 0, 2 * Math.PI);
       c.fill();
+      for (const { term, d, q, endD, endQ } of voltageSegments) {
+        arrow(X(d), Y(q), X(endD), Y(endQ), term.color, 2.2);
+      }
     }
   }
   c.restore();
@@ -413,26 +422,26 @@ export function chart(
         -22,
         true,
       );
-      if (Math.hypot(pt.rd, pt.rq) > 1e-7) {
-        label(
-          "Rₛ i " + Math.hypot(pt.rd, pt.rq).toFixed(1) + " V",
-          X(pt.rd),
-          Y(pt.rq),
-          orange,
-          10,
-          13,
-        );
-        label(
-          "ωₑψ " + Math.hypot(pt.ed, pt.eq).toFixed(1) + " V",
-          X(pt.rd + pt.ed * 0.55),
-          Y(pt.rq + pt.eq * 0.55),
-          teal,
-          9,
-          -10,
-        );
+      for (const { term, d, q, endD, endQ } of voltageSegments) {
+        const ud = term.ud ?? 0,
+          uq = term.uq ?? 0;
+        if (Math.hypot(ud, uq) < 1e-7) continue;
+        const value =
+          term.axis === "dq" ? Math.hypot(ud, uq) : term.axis === "d" ? ud : uq;
+        const x = X((d + endD) / 2),
+          y = Y((q + endQ) / 2);
+        const caption = term.symbol + " " + value.toFixed(1) + " V";
+        c.font = "11px " + font;
+        const offset =
+          term.axis === "dq"
+            ? 12
+            : term.axis === "d"
+              ? -38
+              : uq > 0
+                ? 10
+                : -c.measureText(caption).width - 16;
+        label(caption, x, y, term.color, offset, term.axis === "d" ? -24 : 6);
       }
-      label("ud " + pt.ud.toFixed(1), X(pt.ud / 2), cy, purple, -28, 9);
-      label("uq " + pt.uq.toFixed(1), X(pt.ud), Y(pt.uq / 2), teal, -58, -2);
     }
     label(
       "Umax " + vlim.toFixed(1) + " V",

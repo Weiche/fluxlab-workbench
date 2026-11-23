@@ -19,6 +19,7 @@ import {
 } from "./files.ts";
 import { chart, type Frame } from "./charts.ts";
 import type { Geometry } from "./geometry.ts";
+import { voltageComponents } from "./voltage.ts";
 import SolverWorker from "./worker.ts?worker&inline";
 import batchExample from "../public/examples/operating-points.csv?raw";
 import mapExample from "../public/examples/flux-map.csv?raw";
@@ -75,10 +76,19 @@ const iconButton = (action: string, title: string, ic: string) =>
   '">' +
   icon(ic) +
   "</button>";
+const voltageLegend = (parameters: Parameters) =>
+  '<span><i style="--color:#2963d9"></i>端电压</span>' +
+  voltageComponents(parameters, 0, null)
+    .map(
+      ({ label, color }) =>
+        `<span><i style="--color:${color}"></i>${label}</span>`,
+    )
+    .join("") +
+  '<span><i class="dash" style="--color:#ce8740"></i>电压极限</span>';
 const legend = (kind: string) =>
   kind === "current"
     ? '<span><i class="area"></i>可行域</span><span><i style="--color:#2963d9"></i>电流极限</span><span><i style="--color:#ce8740"></i>电压极限</span><span><i class="dash" style="--color:#9670ba"></i>等转矩线</span><span class="mtpa"><i class="dash" style="--color:#10988b"></i>MTPA</span><span class="no-data" hidden><i class="unmapped"></i>无数据</span>'
-    : '<span><i style="--color:#2963d9"></i>端电压</span><span><i style="--color:#9670ba"></i>d 轴分量</span><span><i style="--color:#10988b"></i>q 轴分量</span><span><i class="dash" style="--color:#ce8740"></i>电压极限</span>';
+    : voltageLegend(frame?.p ?? p);
 const card = (key: string, title: string, ic: string, color: string) =>
   '<section class="card"><div class="card-head"><span class="icon-tile ' +
   color +
@@ -459,8 +469,16 @@ function renderFrame() {
       "A",
     ) +
     val("端电压", x?.ud, x?.uq, "V") +
-    val("旋转磁链电压", x?.ed, x?.eq, "V") +
-    val("电阻压降", x?.rd, x?.rq, "V");
+    voltageComponents(v, op.rpm, x)
+      .map(({ label, symbol, ud, uq }) =>
+        val(label + " " + symbol, ud, uq, "V"),
+      )
+      .join("");
+  const legendElement = $("voltage").nextElementSibling!;
+  if (legendElement.getAttribute("data-model") !== v.model) {
+    legendElement.innerHTML = voltageLegend(v);
+    legendElement.setAttribute("data-model", v.model);
+  }
   const margin = (
     name: string,
     num: number | undefined,
@@ -1000,7 +1018,12 @@ async function action(a: string) {
       changeTab(a);
       break;
     case "sidebar":
-      document.querySelector('[data-action="sidebar"]')?.setAttribute("aria-expanded", String($("shell").classList.toggle("show-side")));
+      document
+        .querySelector('[data-action="sidebar"]')
+        ?.setAttribute(
+          "aria-expanded",
+          String($("shell").classList.toggle("show-side")),
+        );
       break;
     case "auto":
     case "manual": {
@@ -1123,7 +1146,7 @@ async function action(a: string) {
     case "help":
       modal(
         "坐标约定与模型说明",
-        "<h3>输入与运行点</h3><p>转速为有符号机械转速。电流、电压均为相基波峰值。自动求点寻找满足目标电磁转矩的最小电流，手动验点直接计算指定电流。P 表示选中的运行点或标明的边界点。</p><h3>稳态 dq 方程</h3><p>ωₑ = 2πpn / 60<br>uᵈ = Rₛiᵈ − ωₑψᑫ　　uᑫ = Rₛiᑫ + ωₑψᵈ<br>Tₑ = 1.5p (ψᵈiᑫ − ψᑫiᵈ)</p><h3>模型与约束</h3><p>理想模型使用常数电感与永磁体磁链，定子电阻为零。工程模型可启用铜阻和温度修正，铜温度系数取 0.00393 / °C。磁链图以双线性插值计算总磁链。线性 SVPWM 电压上限为 kᵤUdc / √3。</p><h3>读图</h3><p>电流图的着色区域同时满足电流与电压约束。MTPA 是单位电流最大转矩轨迹。电压图的端电压为电阻压降与旋转磁链电压的矢量和。裕量等于极限减去实际幅值。</p><h3>工况回放</h3><p>导入 CSV 后点击表格行或播放。分析、回放和导出复用同一模型。示例电机与磁链数据用于方法验证。</p>",
+        "<h3>输入与运行点</h3><p>转速为有符号机械转速。电流、电压均为相基波峰值。自动求点寻找满足目标电磁转矩的最小电流，手动验点直接计算指定电流。P 表示选中的运行点或标明的边界点。</p><h3>稳态 dq 方程</h3><p>ωₑ = 2πpn / 60<br>uᵈ = Rₛiᵈ − ωₑψᑫ　　uᑫ = Rₛiᑫ + ωₑψᵈ<br>Tₑ = 1.5p (ψᵈiᑫ − ψᑫiᵈ)</p><h3>模型与约束</h3><p>理想模型使用常数电感与永磁体磁链，定子电阻为零。工程模型可启用铜阻和温度修正，铜温度系数取 0.00393 / °C。磁链图以双线性插值计算总磁链。线性 SVPWM 电压上限为 kᵤUdc / √3。</p><h3>读图</h3><p>电流图的着色区域同时满足电流与电压约束。MTPA 是单位电流最大转矩轨迹。电压图将各项首尾相接，蓝色矢量是从原点指向合成端点的端电压。常参数模型显示电阻压降、永磁反电动势及两轴电流耦合项。磁链图模型使用当前工况的总磁链，显示 −ωₑψq 在 d 轴上的分量和 ωₑψd 在 q 轴上的分量。零值分量可在明细中查看。裕量等于极限减去实际幅值。</p><h3>工况回放</h3><p>导入 CSV 后点击表格行或播放。分析、回放和导出复用同一模型。示例电机与磁链数据用于方法验证。</p>",
       );
       break;
   }

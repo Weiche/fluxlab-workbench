@@ -10,6 +10,7 @@ import {
   omega,
 } from "../src/model.ts";
 import { readMap, readBatch, readProject } from "../src/files.ts";
+import { voltageComponents } from "../src/voltage.ts";
 const close = (a, b, e = 1e-5) =>
   assert.ok(Math.abs(a - b) <= e, `${a} != ${b}`);
 const run = (p = {}, op = {}) =>
@@ -148,4 +149,44 @@ test("nonlinear flux data changes the voltage contour and matches requested torq
     sat = point(p, 3200, -75, 75);
   assert.ok(Math.abs(ref.voltage - sat.voltage) > 1);
   assert.equal(run(p, { torque: 500 }).status, "unreachable");
+});
+
+test("constant-parameter voltage vectors sum with signed speed and current", () => {
+  for (const model of ["ideal", "engineering"]) {
+    const p = { ...defaults, model, useTemp: true };
+    for (const rpm of [3000, 0, -3000]) {
+      const x = point(p, rpm, -40, 70);
+      const [drop, magnet, qCurrent, dCurrent] = voltageComponents(p, rpm, x);
+      const w = omega(p, rpm);
+      close(drop.ud, resistance(p) * x.d);
+      close(drop.uq, resistance(p) * x.q);
+      close(magnet.uq, w * p.psi);
+      close(qCurrent.ud, (-w * p.lq * x.q) / 1000);
+      close(dCurrent.uq, (w * p.ld * x.d) / 1000);
+      close(drop.ud + qCurrent.ud, x.ud);
+      close(drop.uq + magnet.uq + dCurrent.uq, x.uq);
+    }
+  }
+});
+
+test("flux-map voltage decomposition uses both total flux axes", () => {
+  const p = {
+    ...defaults,
+    model: "map",
+    map: readMap(
+      "id_A,iq_A,psi_d_Wb,psi_q_Wb\n4,-8,0.14,-0.025\n4,8,0.12,0.018\n20,-8,0.16,-0.028\n20,8,0.15,0.020",
+    ),
+  };
+  const rpm = -2400,
+    x = point(p, rpm, 10, -5);
+  const [drop, qFlux, dFlux] = voltageComponents(p, rpm, x);
+  assert.equal(qFlux.symbol, "−ωₑψq");
+  assert.equal(dFlux.symbol, "ωₑψd");
+  close(drop.ud + qFlux.ud, x.ud);
+  close(drop.uq + dFlux.uq, x.uq);
+  assert.ok(
+    voltageComponents(p, rpm, null).every(
+      ({ ud, uq }) => ud === undefined && uq === undefined,
+    ),
+  );
 });
