@@ -734,6 +734,47 @@ dialog .plot {
   gap: 6px;
   flex-wrap: wrap;
 }
+.replay-toolbar,
+.replay-transport,
+.replay-mode {
+  display: flex;
+  align-items: center;
+}
+.replay-toolbar {
+  flex-wrap: wrap;
+  gap: 5px 16px;
+  padding: 6px 15px;
+  border-bottom: 1px solid #e5eaee;
+  background: #f8fafb;
+  font-size: 12px;
+  color: #405767;
+}
+.replay-transport {
+  gap: 4px;
+}
+.replay-mode {
+  gap: 7px;
+}
+.replay-max {
+  margin: 0;
+}
+#replay-mode,
+#replay-preset {
+  min-height: 30px;
+  padding: 3px 6px;
+  background: white;
+  color: #284152;
+  border: 1px solid #cfd9e1;
+  border-radius: 4px;
+  font-size: 12px;
+}
+#replay-status {
+  margin-left: auto;
+  color: #197d6d;
+}
+#replay-status:empty {
+  display: none;
+}
 .batch-table {
   max-height: 240px;
   overflow: auto;
@@ -758,10 +799,18 @@ dialog .plot {
 .batch-empty {
   padding: 16px;
   display: flex;
+  flex-wrap: wrap;
   gap: 15px;
   align-items: center;
   color: #617484;
   font-size: 12px;
+}
+@media (pointer: coarse) {
+  #replay-mode,
+  #replay-preset,
+  .replay-max {
+    min-height: 44px;
+  }
 }
 .hide-side {
   display: none;

@@ -6,6 +6,7 @@ import {
   type Operation,
   type Parameters,
 } from "./model.ts";
+import type { ReplaySettings } from "./replay.ts";
 export interface Row {
   line: number;
   op: Operation | null;
@@ -19,6 +20,7 @@ export interface Project {
   rows: Row[];
   mapName: string;
   speedRange?: number;
+  replay?: ReplaySettings;
 }
 function csv(text: string) {
   const lines = text
@@ -71,17 +73,27 @@ export function readMap(text: string): FluxMap {
 }
 export const batchHeader = "mode,rpm,torque_Nm,id_A,iq_A";
 export function readBatch(text: string): Row[] {
-  const [header, ...rows] = csv(text),
-    ix = columns(header?.data ?? [], batchHeader.split(","));
+  const [header, ...rows] = csv(text);
+  const speedOnly = header?.data.length === 1 && header.data[0] === "rpm";
+  const ix = speedOnly
+    ? []
+    : columns(header?.data ?? [], batchHeader.split(","));
   if (!rows.length) throw Error("CSV 中没有工况");
   return rows.map(({ line, data }) => {
-    const raw = ix.map((i) => data[i] ?? "");
+    const raw = speedOnly
+      ? ["max-output", data[0] ?? "", "", "", ""]
+      : ix.map((i) => data[i] ?? "");
     try {
       const [mode, n, t, d, q] = raw;
-      if (mode !== "auto" && mode !== "manual")
-        throw Error("mode 应为 auto 或 manual");
-      const op = { ...initial, mode, rpm: number(n, "rpm") } as Operation;
-      if (mode === "auto") op.torque = number(t, "torque_Nm");
+      if (mode !== "auto" && mode !== "manual" && mode !== "max-output")
+        throw Error("mode 应为 auto、manual 或 max-output");
+      const op: Operation = {
+        ...initial,
+        mode: mode === "max-output" ? "auto" : mode,
+        rpm: number(n, "rpm"),
+      };
+      if (mode === "max-output") op.maxOutput = true;
+      else if (mode === "auto") op.torque = number(t, "torque_Nm");
       else {
         op.id = number(d, "id_A");
         op.iq = number(q, "iq_A");
@@ -192,6 +204,14 @@ export function readProject(text: string): Project {
     (!inRange(speedRange, "rpm") || speedRange < 1)
   )
     throw Error("项目横轴范围无效");
+  const replay = v.replay;
+  if (
+    replay !== undefined &&
+    (!replay ||
+      (replay.mode !== "step" && replay.mode !== "smooth") ||
+      typeof replay.keepMaxOutput !== "boolean")
+  )
+    throw Error("项目回放设置无效");
   return {
     name: v.name,
     p: { ...p, pwm },
@@ -199,6 +219,7 @@ export function readProject(text: string): Project {
     rows: v.rows,
     mapName: v.mapName,
     speedRange,
+    replay,
   };
 }
 export function download(name: string, blob: Blob) {

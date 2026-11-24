@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { defaults, initial, solve } from "../src/model.ts";
 const downloadDir = await mkdtemp(join(tmpdir(), "fluxlab-test-"));
 const desktop = process.env.ELECTRON_BIN
   ? await _electron.launch({
@@ -173,7 +174,12 @@ try {
   assert.equal(await page.locator("#n-iq").inputValue(), "155");
   assert.equal(await page.locator("#model-choice").inputValue(), "ideal");
   await by("batch").click();
-  await by("sample").click();
+  const preset = page.getByRole("combobox", { name: "载入预设" });
+  const replayMode = page.getByRole("combobox", { name: "回放方式" });
+  const keepMaxOutput = page.getByRole("checkbox", { name: "保持最大出力" });
+  assert.equal(await replayMode.inputValue(), "step");
+  await preset.selectOption("mixed");
+  await replayMode.selectOption("step");
   await wait("batch-list", "目标不可达");
   await by("next").click();
   await wait("m-torque", "48.0");
@@ -286,9 +292,80 @@ try {
   await rangeInput.press("Enter");
   await waitForRange(String(automatic));
   assert.equal(await rangeInput.inputValue(), String(automatic));
+
+  await by("batch").click();
+  assert.deepEqual(await preset.locator("option").allTextContents(), [
+    "载入预设",
+    "升降速",
+    "高速区扫描",
+    "正反转",
+    "混合工况示例",
+  ]);
+  await preset.selectOption("high-speed");
+  assert.equal(await replayMode.inputValue(), "smooth");
+  assert.ok(await keepMaxOutput.isChecked());
+  await wait("m-speed", "3,500");
+  const readSpeed = () =>
+    Number(document.getElementById("m-speed").textContent.replaceAll(",", ""));
+  await by("play").click();
+  await page.waitForFunction(() => {
+    const rpm = Number(
+      document.getElementById("m-speed").textContent.replaceAll(",", ""),
+    );
+    return rpm > 3700 && rpm < 4700;
+  });
+  await by("play").click();
+  await wait("live", "实时求解");
+  const held = await page.evaluate(readSpeed);
+  assert.ok(held > 3700 && held < 5000);
+  const maximum = solve(defaults, { ...initial, rpm: held, maxOutput: true });
+  assert.ok(
+    Math.abs(Number(await text("m-torque")) - maximum.point.torque) < 0.11,
+  );
+  await page.waitForTimeout(120);
+  assert.equal(await page.evaluate(readSpeed), held);
+  await by("play").click();
+  await wait("m-speed", "8,500");
+  await wait("live", "实时求解");
+  assert.equal(await page.locator("tr.active").getAttribute("data-row"), "3");
+  assert.equal(await by("play").getAttribute("aria-label"), "播放");
+  const replayProject = await grab("save");
+  assert.deepEqual(JSON.parse(replayProject).replay, {
+    mode: "smooth",
+    keepMaxOutput: true,
+  });
+
+  await preset.selectOption("mixed");
+  await wait("m-torque", "24.0");
+  await keepMaxOutput.check();
+  await wait("f-torque", "机械转换功率");
+  assert.match(await page.locator("tr.active").innerText(), /最大出力/);
+  await keepMaxOutput.uncheck();
+  await wait("m-torque", "24.0");
+  await file("batch-import", {
+    name: "speeds.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("rpm\n1000\ninvalid\n-3000"),
+  });
+  await wait("batch-list", "缺少有效数值");
+  await by("play").click();
+  await wait("m-speed", "-3,000");
+  await wait("live", "实时求解");
+  assert.equal(await page.locator("tr.active").getAttribute("data-row"), "2");
+  assert.ok(Number(await text("m-torque")) < 0);
+  await by("export-menu").click();
+  assert.match((await grab("csv")).toString(), /"max-output","-3000",""/);
+  await file("open", {
+    name: "saved-replay.json",
+    mimeType: "application/json",
+    buffer: replayProject,
+  });
+  await wait("m-speed", "8,500");
+  assert.equal(await replayMode.inputValue(), "smooth");
+  assert.ok(await keepMaxOutput.isChecked());
   assert.deepEqual(errors, []);
   console.log(
-    "Passed interaction, dual solvers, map, overshoot, replay, invalid rows, PNG/CSV, project save/reopen, reset, automatic speed range and signed torque display.",
+    "Passed interaction, dual solvers, map, overshoot, stepped and smooth replay, presets, invalid rows, PNG/CSV, project save/reopen, reset, automatic speed range and signed torque display.",
   );
 } finally {
   if (desktop) await desktop.close();

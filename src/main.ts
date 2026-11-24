@@ -39,7 +39,17 @@ import {
   type SpeedRangeEstimate,
   type TorqueEnvelope,
 } from "./tn.ts";
+import {
+  commandType,
+  defaultReplay,
+  interpolateCommand,
+  replayOperation,
+  replayTransition,
+  type ReplaySettings,
+  type ReplayTransition,
+} from "./replay.ts";
 import batchExample from "../public/examples/operating-points.csv?raw";
+import speedExample from "../public/examples/playback-speeds.csv?raw";
 import mapExample from "../public/examples/flux-map.csv?raw";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
@@ -77,6 +87,21 @@ let expanded: "current" | "voltage" | null = null,
   id = 0,
   revision = 1,
   sentRevision = 0;
+let replay: ReplaySettings = defaultReplay;
+let replayLeg: {
+  next: number;
+  elapsed: number;
+  commands: ReplayTransition | null;
+} | null = null;
+let replayClock: number | null = null;
+let replaySpan = 0;
+const replayDuration = 900;
+const replayPresets = [
+  { id: "ramp", label: "升降速", csv: speedExample },
+  { id: "high-speed", label: "高速区扫描", csv: "rpm\n3500\n5000\n6500\n8500" },
+  { id: "reverse", label: "正反转", csv: "rpm\n0\n3000\n0\n-3000\n0" },
+  { id: "mixed", label: "混合工况示例", csv: batchExample },
+];
 let speedRange: number | undefined;
 let displayedSpeedRange = "";
 let tnSpan = 1,
@@ -155,7 +180,18 @@ $("app").innerHTML =
   `<header><div class="brand"><img src="./flux.svg" alt=""><b>FluxLab</b><span>电机分析工作台</span></div><nav aria-label="工作区"><button data-action="analysis" id="nav-analysis" class="sel">${icon("analysis")}运行分析</button><button data-action="batch" id="nav-batch">${icon("batch")}工况回放</button></nav><div class="head-actions"><button data-action="open" title="打开项目">${icon("folder")}<span>打开项目</span></button><button data-action="save" title="保存项目">${icon("save")}<span>保存项目</span></button><i class="divider"></i>${iconButton("help", "使用说明", "help")}</div></header>
 <div class="shell" id="shell"><aside><div class="side-title">${icon("sliders", 18)}<strong>参数设置</strong>${iconButton("reset", "恢复示例参数", "reset")}</div><div class="side-body" id="side"></div></aside>
 <main><div class="page-head"><div><h1 id="page-title">稳态运行分析</h1><div class="project-meta">${icon("motor", 14)}<span id="project-name"></span><i></i><span id="model-meta"></span></div></div><div class="details-action"><label class="head-model">${icon("model", 14)}<select aria-label="模型" id="model-choice"><option value="engineering">常参数工程模型</option><option value="ideal">理想模型</option><option value="map">磁链图模型</option></select></label><button class="small-btn hide-side" data-action="sidebar" aria-expanded="false" aria-controls="side">${icon("sliders")}参数</button><div class="popup-wrap"><button class="btn primary" data-action="export-menu" aria-haspopup="true" aria-expanded="false" id="export-btn">${icon("export")}导出结果${icon("down", 12)}</button><div id="export-menu" class="menu" hidden><button data-action="csv">导出结果 CSV</button><button data-action="png">导出双图 PNG</button></div></div></div></div>
-<section class="card batch-panel" id="batch-panel" hidden><div class="section-head"><span class="icon-tile">${icon("batch")}</span><h2>工况序列</h2><div class="batch-actions"><button class="small-btn" data-action="batch-import">${icon("folder", 14)}导入 CSV</button><button class="small-btn" data-action="sample">载入示例</button>${iconButton("prev", "上一工况", "prev")}${iconButton("play", "播放或暂停", "play")}${iconButton("next", "下一工况", "next")}</div></div><div id="batch-list"></div></section>
+<section class="card batch-panel" id="batch-panel" hidden>
+  <div class="section-head"><span class="icon-tile">${icon("batch")}</span><h2>工况序列</h2>
+    <div class="batch-actions"><select id="replay-preset" aria-label="载入预设"><option value="" selected disabled>载入预设</option>${replayPresets.map(({ id, label }) => `<option value="${id}">${label}</option>`).join("")}</select><button class="small-btn" data-action="batch-import">${icon("folder", 14)}导入 CSV</button></div>
+  </div>
+  <div class="replay-toolbar">
+    <div class="replay-transport">${iconButton("prev", "上一工况", "prev")}${iconButton("play", "播放", "play")}${iconButton("next", "下一工况", "next")}</div>
+    <label class="replay-mode">回放方式 <select id="replay-mode"><option value="step">逐点回放</option><option value="smooth">平滑过渡</option></select></label>
+    <label class="check replay-max" title="开启时优先按最大出力求解，关闭后按各行给定方式回放"><input id="replay-max" type="checkbox">保持最大出力</label>
+    <span id="replay-status" role="status"></span>
+  </div>
+  <div id="batch-list"></div>
+</section>
 <section class="metrics" aria-label="运行指标">${metric("torque", "电磁转矩", "torque", "#147f72", "N·m")}${metric("current", "电流幅值", "wave", "#3472b9", "A")}${metric("voltage", "电压幅值", "bolt", "#ba843b", "V")}${metric("speed", "机械转速", "speed", "#8371a6", "rpm")}</section>
 <section class="card tn-card" id="tn-card" style="--tn-left:${speedAxis.left}px;--tn-right:${speedAxis.right}px">
   <div class="card-head"><span class="icon-tile blue">${icon("analysis")}</span><h2>转矩–转速</h2>
@@ -418,11 +454,17 @@ function toast(t: string) {
   toastTimer = window.setTimeout(() => ($("toast").hidden = true), 4500);
 }
 let dragging = false;
-let pending: { p: Parameters; o: Operation; id: number } | null = null;
+let pending: {
+  p: Parameters;
+  o: Operation;
+  id: number;
+  preview: string;
+} | null = null;
 function drawTN() {
   const invalidRow = tab === "batch" && rowIndex >= 0 && !rows[rowIndex]?.op;
+  const rpm = playing && replayLeg?.commands && frame ? frame.o.rpm : o.rpm;
   const torque =
-    !invalidRow && frame?.o.rpm === o.rpm ? frame.r.point?.torque : undefined;
+    !invalidRow && frame?.o.rpm === rpm ? frame.r.point?.torque : undefined;
   const showNegative = $<HTMLInputElement>("tn-negative").checked;
   const hiddenPoint = !showNegative && (torque ?? 0) < 0;
   const pointKey = $("tn-point-key");
@@ -430,12 +472,13 @@ function drawTN() {
     pointKey.hidden = hiddenPoint;
     $("tn-hidden-point").hidden = !hiddenPoint;
   }
-  drawSpeedChart($("tn"), tnSpan, o.rpm, torque, tnEnvelope, showNegative);
+  drawSpeedChart($("tn"), tnSpan, rpm, torque, tnEnvelope, showNegative);
 }
 function syncSpeed() {
   const modelChanged = tnParameters !== p;
   if (modelChanged) tnEstimate = undefined;
-  const span = speedSpan(p, o.rpm, speedRange ?? tnEstimate?.span);
+  const extent = Math.max(Math.abs(o.rpm), replaySpan);
+  const span = speedSpan(p, extent, speedRange ?? tnEstimate?.span);
   const slider = $<HTMLInputElement>("s-rpm");
   slider.min = String(-span);
   slider.max = String(span);
@@ -443,7 +486,8 @@ function syncSpeed() {
   slider.style.setProperty("--pct", (1 + o.rpm / span) * 50 + "%");
   const rpmInput = $<HTMLInputElement>("n-rpm");
   const spanInput = $<HTMLInputElement>("n-speed-span");
-  if (document.activeElement !== rpmInput) rpmInput.value = String(o.rpm);
+  if (document.activeElement !== rpmInput)
+    rpmInput.value = String(replayLeg?.commands ? +o.rpm.toFixed(1) : o.rpm);
   if (
     document.activeElement !== spanInput ||
     spanInput.value === displayedSpeedRange
@@ -482,15 +526,16 @@ function syncSpeed() {
       };
       worker.postMessage({
         parameters: p,
-        rpm: o.rpm,
+        rpm: Math.max(Math.abs(o.rpm), replaySpan),
         requested: speedRange,
         estimate: tnEstimate,
       });
     }, 120);
   }
-  drawTN();
+  if (!playing || !replayLeg?.commands) drawTN();
 }
 function enqueue(modelChange = false) {
+  if (modelChange && tab === "batch") stop();
   syncSpeed();
   if (modelChange) {
     revision++;
@@ -509,7 +554,12 @@ function send() {
   if (busy || !dirty) return;
   busy = true;
   dirty = false;
-  pending = { p: { ...p }, o: { ...o }, id: ++id };
+  const preview = dragging
+    ? "拖动预览"
+    : playing && replay.mode === "smooth"
+      ? "平滑回放"
+      : "";
+  pending = { p: { ...p }, o: { ...o }, id: ++id, preview };
   const keepMap = p.map === sentMap;
   worker.postMessage({
     id,
@@ -517,7 +567,7 @@ function send() {
     keepMap,
     o,
     compare,
-    preview: dragging,
+    preview: preview !== "",
     ratio: plotRatio(),
   });
   sentRevision = revision;
@@ -536,7 +586,7 @@ worker.onmessage = (e) => {
     frame = { p: pending.p, o: m.o, r: m.r, g: lastG };
     comparison = m.comparison;
     renderFrame();
-    $("live").textContent = m.preview ? "拖动预览" : "实时求解";
+    $("live").textContent = pending.preview || "实时求解";
   }
   if (dirty) send();
 };
@@ -885,11 +935,141 @@ function showComparison() {
     true,
   );
 }
-function stop() {
-  if (playing) clearInterval(playing);
+function updatePlayButton() {
+  const b = document.querySelector<HTMLButtonElement>("[data-action=play]")!;
+  const label = playing ? "暂停" : "播放";
+  b.innerHTML = icon(playing ? "pause" : "play");
+  b.title = label;
+  b.setAttribute("aria-label", label);
+}
+function stop(keepPosition = false) {
+  const wasPlaying = playing !== 0;
+  if (wasPlaying) cancelAnimationFrame(playing);
   playing = 0;
-  const b = document.querySelector<HTMLButtonElement>("[data-action=play]");
-  if (b) b.innerHTML = icon("play");
+  replayClock = null;
+  if (!keepPosition) {
+    replayLeg = null;
+    replaySpan = 0;
+    $("replay-status").textContent = "";
+  }
+  if (wasPlaying) {
+    updatePlayButton();
+    if (keepPosition) enqueue();
+  }
+}
+function rowOperation(i: number) {
+  return replayOperation(rows[i]?.op ?? null, replay.keepMaxOutput);
+}
+function nextReplayRow(start: number) {
+  for (let i = start; i < rows.length; i++) {
+    if (replay.mode === "step" || rows[i].op) return i;
+  }
+  return -1;
+}
+function previewReplay(op: Operation) {
+  const commandChanged = commandType(o) !== commandType(op);
+  o = op;
+  if (commandChanged) sidebar();
+  // Keep the live inputs in sync without moving focus or rebuilding the sidebar.
+  for (const key of op.mode === "manual"
+    ? (["id", "iq"] as const)
+    : (["torque"] as const)) {
+    const input = $<HTMLInputElement>("n-" + key);
+    if (!input.readOnly && document.activeElement !== input)
+      input.value = String(+op[key].toFixed(2));
+    const slider = $<HTMLInputElement>("s-" + key);
+    if (slider) {
+      const lo = Math.min(+slider.min, op[key]);
+      const hi = Math.max(+slider.max, op[key]);
+      slider.min = String(lo);
+      slider.max = String(hi);
+      slider.value = String(op[key]);
+      slider.style.setProperty(
+        "--pct",
+        ((op[key] - lo) / (hi - lo)) * 100 + "%",
+      );
+    }
+  }
+  enqueue();
+}
+function replayTick(now: number) {
+  if (!replayLeg) {
+    const next = nextReplayRow(rowIndex + 1);
+    if (next < 0) {
+      stop();
+      syncSpeed();
+      return;
+    }
+    let commands: ReplayTransition | null = null;
+    if (replay.mode === "smooth") {
+      const from = rowOperation(rowIndex)!;
+      const to = rowOperation(next)!;
+      const a = batchResults[rowIndex],
+        b = batchResults[next];
+      if (
+        commandType(from) !== commandType(to) &&
+        batchWorker &&
+        (a === undefined || b === undefined)
+      ) {
+        const status = $("replay-status");
+        if (status.textContent !== "正在求解过渡端点")
+          status.textContent = "正在求解过渡端点";
+        playing = requestAnimationFrame(replayTick);
+        return;
+      }
+      commands = replayTransition(from, to, a?.point ?? null, b?.point ?? null);
+      $("replay-status").textContent =
+        "第 " +
+        rows[rowIndex].line +
+        " → " +
+        rows[next].line +
+        " 行" +
+        (commands ? "" : " · 端点电流不可用，到时切换");
+    }
+    replayLeg = { next, elapsed: 0, commands };
+  }
+  replayLeg.elapsed += now - (replayClock ?? now);
+  replayClock = now;
+  if (replayLeg.elapsed >= replayDuration) {
+    selectRow(replayLeg.next);
+    replayLeg = null;
+    replayClock = null;
+    if (nextReplayRow(rowIndex + 1) < 0) {
+      stop();
+      enqueue();
+      return;
+    }
+  } else if (replayLeg.commands) {
+    previewReplay(
+      interpolateCommand(
+        replayLeg.commands,
+        replayLeg.elapsed / replayDuration,
+      ),
+    );
+  }
+  playing = requestAnimationFrame(replayTick);
+}
+function playReplay() {
+  if (playing) {
+    stop(true);
+    return;
+  }
+  if (!replayLeg) {
+    const first = nextReplayRow(0);
+    if (first < 0) return;
+    const restart =
+      rowIndex < 0 ||
+      (replay.mode === "smooth" && !rows[rowIndex]?.op) ||
+      nextReplayRow(rowIndex + 1) < 0;
+    if (replay.mode === "smooth")
+      replaySpan = rows.reduce(
+        (span, row) => Math.max(span, Math.abs(row.op?.rpm ?? 0)),
+        0,
+      );
+    selectRow(restart ? first : rowIndex);
+  }
+  playing = requestAnimationFrame(replayTick);
+  updatePlayButton();
 }
 function invalidRowView() {
   const row = rows[rowIndex];
@@ -922,7 +1102,7 @@ function invalidRowView() {
 function selectRow(i: number) {
   if (i < 0 || i >= rows.length) return;
   rowIndex = i;
-  const op = rows[i].op;
+  const op = rowOperation(i);
   if (op) {
     o = { ...op };
     sidebar();
@@ -949,7 +1129,9 @@ function startBatch() {
       type: "batch",
       id: token,
       p: first ? p : null,
-      ops: rows.slice(pos, pos + 8).map((row) => row.op),
+      ops: rows
+        .slice(pos, pos + 8)
+        .map((row) => replayOperation(row.op, replay.keepMaxOutput)),
     });
   }
   w.onmessage = (e) => {
@@ -957,6 +1139,7 @@ function startBatch() {
     if (e.data.error) {
       toast(e.data.error);
       w.terminate();
+      batchWorker = null;
       return;
     }
     batchResults.push(...e.data.results);
@@ -969,7 +1152,12 @@ function startBatch() {
     }
     renderBatch();
   };
-  w.onerror = (e) => toast("批量求解失败 " + e.message);
+  w.onerror = (e) => {
+    if (token !== batchRevision) return;
+    toast("批量求解失败 " + e.message);
+    w.terminate();
+    batchWorker = null;
+  };
   next();
   renderBatch();
 }
@@ -979,7 +1167,7 @@ function renderBatch() {
     ? '<div class="batch-table"><table class="data-table"><thead><tr><th>行</th><th>给定方式</th><th>机械转速 / rpm</th><th>给定值</th><th>转矩 / N·m</th><th>状态</th></tr></thead><tbody>' +
       rows
         .map((row, i) => {
-          const op = row.op,
+          const op = rowOperation(i),
             r = batchResults[i];
           return (
             '<tr tabindex="0" data-row="' +
@@ -989,14 +1177,22 @@ function renderBatch() {
             '"><td>' +
             row.line +
             "</td><td>" +
-            (op?.mode === "auto" ? "自动求点" : op ? "手动验点" : "—") +
+            (op
+              ? isMaxOutput(op)
+                ? "最大出力"
+                : op.mode === "auto"
+                  ? "自动求点"
+                  : "手动验点"
+              : "—") +
             "</td><td>" +
             (op?.rpm ?? "—") +
             "</td><td>" +
             (op
-              ? op.mode === "auto"
-                ? op.torque + " N·m"
-                : op.id + ", " + op.iq + " A"
+              ? isMaxOutput(op)
+                ? "—"
+                : op.mode === "auto"
+                  ? op.torque + " N·m"
+                  : op.id + ", " + op.iq + " A"
               : "—") +
             "</td><td>" +
             f(r?.point?.torque, 2) +
@@ -1007,13 +1203,14 @@ function renderBatch() {
         })
         .join("") +
       "</tbody></table></div>"
-    : '<div class="batch-empty">导入工况表或载入示例，逐点查看约束与矢量。<a class="inline-link" href="./examples/operating-points.csv" download>下载 CSV 模板</a></div>';
+    : '<div class="batch-empty">选择预设或导入工况表。<a class="inline-link" href="./examples/operating-points.csv" download>工况 CSV 模板</a><a class="inline-link" href="./examples/playback-speeds.csv" download>转速 CSV 模板</a></div>';
   for (const a of ["prev", "next", "play"]) {
     const b = document.querySelector<HTMLButtonElement>(
       "[data-action=" + a + "]",
     )!;
     b.disabled =
       !rows.length ||
+      (a === "play" && nextReplayRow(0) < 0) ||
       (a === "prev" && rowIndex <= 0) ||
       (a === "next" && rowIndex === rows.length - 1);
   }
@@ -1029,6 +1226,35 @@ function changeTab(t: typeof tab) {
   if (t === "batch" && !batchReady && !batchWorker) startBatch();
   renderBatch();
 }
+function setReplaySettings(settings: ReplaySettings) {
+  replay = settings;
+  $<HTMLSelectElement>("replay-mode").value = replay.mode;
+  $<HTMLInputElement>("replay-max").checked = replay.keepMaxOutput;
+}
+$("replay-mode").addEventListener("change", (e) => {
+  stop();
+  replay = {
+    ...replay,
+    mode: (e.target as HTMLSelectElement).value as ReplaySettings["mode"],
+  };
+  if (rowIndex >= 0) selectRow(rowIndex);
+  else renderBatch();
+});
+$("replay-max").addEventListener("change", (e) => {
+  stop();
+  replay = { ...replay, keepMaxOutput: (e.target as HTMLInputElement).checked };
+  if (rowIndex >= 0) selectRow(rowIndex);
+  startBatch();
+});
+$("replay-preset").addEventListener("change", (e) => {
+  const select = e.target as HTMLSelectElement;
+  const preset = replayPresets.find(({ id }) => id === select.value);
+  if (!preset) return;
+  loadRows(preset.csv, {
+    mode: "smooth",
+    keepMaxOutput: preset.id !== "mixed",
+  });
+});
 function textFile(filename: string, content: string, type: string) {
   download(filename, new Blob([content], { type }));
 }
@@ -1074,9 +1300,14 @@ function exportCsv() {
   };
   const op = frame.o;
   const lines = batch
-    ? rows.map((row, i) =>
-        output(row.raw, batchResults[i], row.error, String(row.line)),
-      )
+    ? rows.map((row, i) => {
+        const op = rowOperation(i);
+        const raw =
+          op && isMaxOutput(op)
+            ? ["max-output", String(op.rpm), "", "", ""]
+            : row.raw;
+        return output(raw, batchResults[i], row.error, String(row.line));
+      })
     : [
         output(
           [
@@ -1190,9 +1421,10 @@ function choose(t: typeof importType) {
   input.accept = t === "open" ? ".json,.fluxlab" : ".csv";
   input.click();
 }
-function loadRows(text: string) {
+function loadRows(text: string, settings = replay) {
   const fresh = readBatch(text);
   stop();
+  setReplaySettings(settings);
   rows = fresh;
   batchReady = false;
   selectRow(0);
@@ -1212,8 +1444,10 @@ $("file").addEventListener("change", async () => {
   try {
     const text = await file.text();
     if (importType === "map") loadMap(text, file.name);
-    else if (importType === "batch") loadRows(text);
-    else {
+    else if (importType === "batch") {
+      loadRows(text);
+      $<HTMLSelectElement>("replay-preset").value = "";
+    } else {
       const v = readProject(text);
       stop();
       batchWorker?.terminate();
@@ -1222,6 +1456,8 @@ $("file").addEventListener("change", async () => {
       p = v.p;
       o = v.o;
       speedRange = v.speedRange;
+      setReplaySettings(v.replay ?? defaultReplay);
+      $<HTMLSelectElement>("replay-preset").value = "";
       name = v.name;
       mapName = v.mapName;
       rows = v.rows;
@@ -1236,7 +1472,8 @@ $("file").addEventListener("change", async () => {
   }
 });
 function sample(file: string) {
-  return file === "flux-map.csv" ? mapExample : batchExample;
+  if (file === "flux-map.csv") return mapExample;
+  return file === "playback-speeds.csv" ? speedExample : batchExample;
 }
 async function settled() {
   const until = performance.now() + 10000;
@@ -1266,6 +1503,7 @@ async function action(a: string) {
     case "auto":
     case "manual": {
       if (a === o.mode) return;
+      if (playing && replay.mode === "smooth") stop(true);
       await settled();
       const x = frame?.r.point;
       o = {
@@ -1290,7 +1528,16 @@ async function action(a: string) {
     case "save":
       textFile(
         name + ".fluxlab.json",
-        JSON.stringify({ version: 1, name, p, o, mapName, rows, speedRange }),
+        JSON.stringify({
+          version: 1,
+          name,
+          p,
+          o,
+          mapName,
+          rows,
+          speedRange,
+          replay,
+        }),
         "application/json",
       );
       break;
@@ -1300,29 +1547,19 @@ async function action(a: string) {
     case "map-import":
       choose("map");
       break;
-    case "sample":
-      loadRows(await sample("operating-points.csv"));
-      break;
     case "map-sample":
       loadMap(await sample("flux-map.csv"), "flux-map.csv");
       break;
     case "prev":
+      stop();
       selectRow(rowIndex - 1);
       break;
     case "next":
+      stop();
       selectRow(rowIndex + 1);
       break;
     case "play":
-      if (playing) {
-        stop();
-        break;
-      }
-      if (rowIndex < 0 || rowIndex === rows.length - 1) selectRow(0);
-      playing = window.setInterval(() => {
-        if (rowIndex >= rows.length - 1) stop();
-        else selectRow(rowIndex + 1);
-      }, 900);
-      document.querySelector("[data-action=play]")!.innerHTML = icon("pause");
+      playReplay();
       break;
     case "export-menu":
       $("export-menu").hidden = !$("export-menu").hidden;
@@ -1332,10 +1569,12 @@ async function action(a: string) {
       );
       break;
     case "csv":
+      if (playing && replay.mode === "smooth") stop(true);
       await settled();
       exportCsv();
       break;
     case "png":
+      if (playing && replay.mode === "smooth") stop(true);
       await settled();
       exportPng();
       break;
@@ -1385,7 +1624,7 @@ async function action(a: string) {
     case "help":
       modal(
         "坐标约定与模型说明",
-        "<h3>输入与运行点</h3><p>转速为有符号机械转速。电流、电压均为相基波峰值。自动求点可按给定电磁转矩寻找最小电流。勾选「最大出力转矩」时，按当前转速和约束实时求最大出力，并显示电磁转矩乘机械角速度得到的机械转换功率。手动验点直接计算指定电流。P 表示选中的运行点或标明的边界点。</p><h3>稳态 dq 方程</h3><p>ω<sub>e</sub> = 2πpn / 60<br>V<sub>d</sub> = R<sub>s</sub>i<sub>d</sub> − ω<sub>e</sub>ψ<sub>q</sub>　　V<sub>q</sub> = R<sub>s</sub>i<sub>q</sub> + ω<sub>e</sub>ψ<sub>d</sub><br>T<sub>e</sub> = 1.5p (ψ<sub>d</sub>i<sub>q</sub> − ψ<sub>q</sub>i<sub>d</sub>)</p><h3>模型与约束</h3><p>默认使用常参数工程模型，并计入定子电阻。可关闭定子电阻或切换到理想模型进行对照。工程模型可按绕组温度修正铜阻，铜温度系数取 0.00393 / °C。磁链图以双线性插值计算总磁链。线性调制的相电压峰值上限，SVPWM 为 V<sub>dc</sub> / √3，SPWM 为 V<sub>dc</sub> / 2。常参数工程模型与磁链图模型可再乘以电压利用率 k<sub>v</sub>。直接给定电压上限时，求解使用输入的电压值。紫色六边形表示理想两电平逆变器可合成的平均电压范围，顶点幅值为 2V<sub>dc</sub> / 3。图中取转子电角度 0°，第一个顶点沿正 d 轴。橙色圆表示求解采用的电压限值。</p><h3>读图</h3><p>转矩–转速图默认显示零及正转矩，勾选「显示负转矩」即可查看完整包络。横轴默认随模型求得的可达转速边界调整，图下滑块与横轴同尺度。未找到有限边界时，横轴保留观察范围。可清空横轴范围输入框恢复自动估算。输入更高转速时横轴自动涵盖当前点。电流图的着色区域同时满足电流与电压约束。MTPA 是单位电流最大转矩轨迹。MTPV 是固定转速下，各电压幅值对应的最大正、负转矩点的轨迹。圆点对应当前电压限值，仍需结合电流极限判断是否可达。常参数模型计入当前电阻设置，非零转速时显示 MTPV。电压图将各项首尾相接，蓝色矢量是从原点指向合成端点的端电压。常参数模型依次连接永磁反电动势、电感电压和电阻压降。前两项的终点是旋转磁链电压。电感电压 V<sub>L</sub> 的 (d, q) 分量为 (−ω<sub>e</sub>L<sub>q</sub>i<sub>q</sub>, ω<sub>e</sub>L<sub>d</sub>i<sub>d</sub>)。磁链图模型使用当前工况的总磁链，显示 −ω<sub>e</sub>ψ<sub>q</sub> 在 d 轴上的分量和 ω<sub>e</sub>ψ<sub>d</sub> 在 q 轴上的分量。零值分量可在明细中查看。裕量等于极限减去实际幅值。</p><h3>工况回放</h3><p>导入 CSV 后点击表格行或播放。分析、回放和导出复用同一模型。示例电机与磁链数据用于方法验证。</p>",
+        "<h3>输入与运行点</h3><p>转速为有符号机械转速。电流、电压均为相基波峰值。自动求点可按给定电磁转矩寻找最小电流。勾选「最大出力转矩」时，按当前转速和约束实时求最大出力，并显示电磁转矩乘机械角速度得到的机械转换功率。手动验点直接计算指定电流。P 表示选中的运行点或标明的边界点。</p><h3>稳态 dq 方程</h3><p>ω<sub>e</sub> = 2πpn / 60<br>V<sub>d</sub> = R<sub>s</sub>i<sub>d</sub> − ω<sub>e</sub>ψ<sub>q</sub>　　V<sub>q</sub> = R<sub>s</sub>i<sub>q</sub> + ω<sub>e</sub>ψ<sub>d</sub><br>T<sub>e</sub> = 1.5p (ψ<sub>d</sub>i<sub>q</sub> − ψ<sub>q</sub>i<sub>d</sub>)</p><h3>模型与约束</h3><p>默认使用常参数工程模型，并计入定子电阻。可关闭定子电阻或切换到理想模型进行对照。工程模型可按绕组温度修正铜阻，铜温度系数取 0.00393 / °C。磁链图以双线性插值计算总磁链。线性调制的相电压峰值上限，SVPWM 为 V<sub>dc</sub> / √3，SPWM 为 V<sub>dc</sub> / 2。常参数工程模型与磁链图模型可再乘以电压利用率 k<sub>v</sub>。直接给定电压上限时，求解使用输入的电压值。紫色六边形表示理想两电平逆变器可合成的平均电压范围，顶点幅值为 2V<sub>dc</sub> / 3。图中取转子电角度 0°，第一个顶点沿正 d 轴。橙色圆表示求解采用的电压限值。</p><h3>读图</h3><p>转矩–转速图默认显示零及正转矩，勾选「显示负转矩」即可查看完整包络。横轴默认随模型求得的可达转速边界调整，图下滑块与横轴同尺度。未找到有限边界时，横轴保留观察范围。可清空横轴范围输入框恢复自动估算。输入更高转速时横轴自动涵盖当前点。电流图的着色区域同时满足电流与电压约束。MTPA 是单位电流最大转矩轨迹。MTPV 是固定转速下，各电压幅值对应的最大正、负转矩点的轨迹。圆点对应当前电压限值，仍需结合电流极限判断是否可达。常参数模型计入当前电阻设置，非零转速时显示 MTPV。电压图将各项首尾相接，蓝色矢量是从原点指向合成端点的端电压。常参数模型依次连接永磁反电动势、电感电压和电阻压降。前两项的终点是旋转磁链电压。电感电压 V<sub>L</sub> 的 (d, q) 分量为 (−ω<sub>e</sub>L<sub>q</sub>i<sub>q</sub>, ω<sub>e</sub>L<sub>d</sub>i<sub>d</sub>)。磁链图模型使用当前工况的总磁链，显示 −ω<sub>e</sub>ψ<sub>q</sub> 在 d 轴上的分量和 ω<sub>e</sub>ψ<sub>d</sub> 在 q 轴上的分量。零值分量可在明细中查看。裕量等于极限减去实际幅值。</p><h3>工况回放</h3><p>可直接载入预设，也可导入工况 CSV 或只含 rpm 一列的转速表。平滑过渡缓入缓出，同类工况插值目标转矩或 dq 电流，混合给定方式使用两端 dq 电流衔接。勾选「保持最大出力」后，回放按每个转速重新求最大出力。分析、回放和导出复用同一模型。</p>",
       );
       break;
   }
