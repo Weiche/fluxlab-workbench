@@ -752,6 +752,15 @@ dialog .plot {
 .replay-transport {
   gap: 4px;
 }
+.replay-loop {
+  margin-left: 4px;
+  white-space: nowrap;
+}
+.replay-loop[aria-pressed="true"] {
+  border-color: #8bc9bc;
+  background: #e6f5f0;
+  color: #11695b;
+}
 .replay-mode {
   gap: 7px;
 }
@@ -772,6 +781,7 @@ dialog .plot {
   margin-left: auto;
   color: #197d6d;
 }
+#replay-preset-note:empty,
 #replay-status:empty {
   display: none;
 }
@@ -808,7 +818,8 @@ dialog .plot {
 @media (pointer: coarse) {
   #replay-mode,
   #replay-preset,
-  .replay-max {
+  .replay-max,
+  .replay-loop {
     min-height: 44px;
   }
 }

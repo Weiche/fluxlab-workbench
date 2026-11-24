@@ -24,6 +24,7 @@ export interface SpeedRangeEstimate {
   span: number;
   edges: number[];
   foundLimit: boolean;
+  forwardLimit: number | null;
 }
 
 export const speedAxis = { left: 58, right: 34 };
@@ -54,7 +55,7 @@ export function estimateSpeedRange(p: Parameters): SpeedRangeEstimate {
   // With zero flux achievable inside the current disk, the constant-parameter
   // model has no finite electrical speed ceiling.
   if ((!mapped && p.psi <= (p.ld * p.imax) / 1000) || !hasFeasibleCurrent(p, 0))
-    return { span: seed, edges: [], foundLimit: false };
+    return { span: seed, edges: [], foundLimit: false, forwardLimit: null };
 
   function edge(direction: number): number | null {
     let low = 0;
@@ -81,7 +82,7 @@ export function estimateSpeedRange(p: Parameters): SpeedRangeEstimate {
   ];
   const end = 1.05 * Math.max(...edges.map(Math.abs), 0);
   const span = speedSpan(p, Math.max(end, foundLimit ? 0 : seed), 1);
-  return { span, edges, foundLimit };
+  return { span, edges, foundLimit, forwardLimit: forward };
 }
 
 export function torqueEnvelope(
