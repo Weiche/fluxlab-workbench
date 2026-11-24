@@ -45,6 +45,7 @@ import {
   interpolateCommand,
   replayOperation,
   replayTransition,
+  sameReplayCommand,
   type ReplaySettings,
   type ReplayTransition,
 } from "./replay.ts";
@@ -95,9 +96,12 @@ let replayLeg: {
 } | null = null;
 let replayClock: number | null = null;
 let replaySpan = 0;
+let peakPresetSpeed: number | null = null;
 const replayDuration = 900;
+const peakPresetId = "peak-speed";
 const replayPresets = [
   { id: "ramp", label: "升降速", csv: speedExample },
+  { id: peakPresetId, label: "0 → 最高速 → 0", csv: null },
   { id: "high-speed", label: "高速区扫描", csv: "rpm\n3500\n5000\n6500\n8500" },
   { id: "reverse", label: "正反转", csv: "rpm\n0\n3000\n0\n-3000\n0" },
   { id: "mixed", label: "混合工况示例", csv: batchExample },
@@ -185,9 +189,10 @@ $("app").innerHTML =
     <div class="batch-actions"><select id="replay-preset" aria-label="载入预设"><option value="" selected disabled>载入预设</option>${replayPresets.map(({ id, label }) => `<option value="${id}">${label}</option>`).join("")}</select><button class="small-btn" data-action="batch-import">${icon("folder", 14)}导入 CSV</button></div>
   </div>
   <div class="replay-toolbar">
-    <div class="replay-transport">${iconButton("prev", "上一工况", "prev")}${iconButton("play", "播放", "play")}${iconButton("next", "下一工况", "next")}</div>
+    <div class="replay-transport">${iconButton("prev", "上一工况", "prev")}${iconButton("play", "播放", "play")}${iconButton("next", "下一工况", "next")}<button class="small-btn replay-loop" data-action="replay-loop" aria-pressed="false">${icon("repeat", 14)}循环回放</button></div>
     <label class="replay-mode">回放方式 <select id="replay-mode"><option value="step">逐点回放</option><option value="smooth">平滑过渡</option></select></label>
     <label class="check replay-max" title="开启时优先按最大出力求解，关闭后按各行给定方式回放"><input id="replay-max" type="checkbox">保持最大出力</label>
+    <span id="replay-preset-note" role="status"></span>
     <span id="replay-status" role="status"></span>
   </div>
   <div id="batch-list"></div>
@@ -517,12 +522,18 @@ function syncSpeed() {
             ? ""
             : "计算范围内未找到有限转速边界";
         syncSpeed();
+        updatePeakSpeedPreset();
       };
       worker.onerror = () => {
         if (tnWorker !== worker) return;
         $("tn-status").textContent = "包络计算失败";
         worker.terminate();
         tnWorker = null;
+        if (peakPresetSelected() && !tnEstimate) {
+          resetPresetChoice();
+          $("replay-preset-note").textContent = "无法估算预设的最高转速";
+          renderBatch();
+        }
       };
       worker.postMessage({
         parameters: p,
@@ -538,6 +549,8 @@ function enqueue(modelChange = false) {
   if (modelChange && tab === "batch") stop();
   syncSpeed();
   if (modelChange) {
+    if (tab === "batch" && peakPresetSelected())
+      $("replay-preset-note").textContent = "正在估算最高转速";
     revision++;
     if (tab === "batch" && !dragging) startBatch();
     else {
@@ -796,6 +809,7 @@ $("tn-controls").addEventListener("change", (e) => {
     else toast("横轴范围超出有效范围");
     syncSpeed();
     displayedSpeedRange = input.value = String(tnSpan);
+    updatePeakSpeedPreset();
   }
 });
 $("side").addEventListener("input", (e) => {
@@ -966,6 +980,12 @@ function nextReplayRow(start: number) {
   }
   return -1;
 }
+function nextPlaybackRow() {
+  const next = nextReplayRow(rowIndex + 1);
+  if (next >= 0 || !replay.loop) return next;
+  const first = nextReplayRow(0);
+  return first === rowIndex ? -1 : first;
+}
 function previewReplay(op: Operation) {
   const commandChanged = commandType(o) !== commandType(op);
   o = op;
@@ -994,7 +1014,16 @@ function previewReplay(op: Operation) {
 }
 function replayTick(now: number) {
   if (!replayLeg) {
-    const next = nextReplayRow(rowIndex + 1);
+    let next = nextPlaybackRow();
+    if (
+      next >= 0 &&
+      next < rowIndex &&
+      replay.mode === "smooth" &&
+      sameReplayCommand(rowOperation(rowIndex)!, rowOperation(next)!)
+    ) {
+      selectRow(next);
+      next = nextReplayRow(rowIndex + 1);
+    }
     if (next < 0) {
       stop();
       syncSpeed();
@@ -1034,7 +1063,7 @@ function replayTick(now: number) {
     selectRow(replayLeg.next);
     replayLeg = null;
     replayClock = null;
-    if (nextReplayRow(rowIndex + 1) < 0) {
+    if (nextPlaybackRow() < 0) {
       stop();
       enqueue();
       return;
@@ -1050,6 +1079,7 @@ function replayTick(now: number) {
   playing = requestAnimationFrame(replayTick);
 }
 function playReplay() {
+  if (peakPresetSelected() && !tnEstimate) return;
   if (playing) {
     stop(true);
     return;
@@ -1209,6 +1239,7 @@ function renderBatch() {
       "[data-action=" + a + "]",
     )!;
     b.disabled =
+      (peakPresetSelected() && !tnEstimate) ||
       !rows.length ||
       (a === "play" && nextReplayRow(0) < 0) ||
       (a === "prev" && rowIndex <= 0) ||
@@ -1223,6 +1254,7 @@ function changeTab(t: typeof tab) {
   $("nav-batch").classList.toggle("sel", t === "batch");
   $("page-title").textContent = t === "batch" ? "批量工况回放" : "稳态运行分析";
   $("batch-panel").hidden = t !== "batch";
+  if (t === "batch") updatePeakSpeedPreset();
   if (t === "batch" && !batchReady && !batchWorker) startBatch();
   renderBatch();
 }
@@ -1230,6 +1262,46 @@ function setReplaySettings(settings: ReplaySettings) {
   replay = settings;
   $<HTMLSelectElement>("replay-mode").value = replay.mode;
   $<HTMLInputElement>("replay-max").checked = replay.keepMaxOutput;
+  document
+    .querySelector('[data-action="replay-loop"]')!
+    .setAttribute("aria-pressed", String(Boolean(replay.loop)));
+}
+function peakPresetSelected() {
+  return $<HTMLSelectElement>("replay-preset").value === peakPresetId;
+}
+function resetPresetChoice() {
+  $<HTMLSelectElement>("replay-preset").value = "";
+  peakPresetSpeed = null;
+  $("replay-preset-note").textContent = "";
+}
+function updatePeakSpeedPreset() {
+  if (tab !== "batch" || !peakPresetSelected()) return;
+  if (!tnEstimate) {
+    $("replay-preset-note").textContent = "正在估算最高转速";
+    renderBatch();
+    return;
+  }
+  const limit = tnEstimate.forwardLimit;
+  const peak =
+    limit === null
+      ? (speedRange ?? tnEstimate.span)
+      : limit >= 1
+        ? Math.floor(limit)
+        : limit;
+  $("replay-preset-note").textContent =
+    limit === null
+      ? "未找到有限正转上限 · 使用横轴范围"
+      : p.model === "map"
+        ? "最高转速按当前磁链表估算"
+        : "";
+  if (peak !== peakPresetSpeed) {
+    const settings =
+      peakPresetSpeed === null
+        ? { ...replay, mode: "smooth" as const, keepMaxOutput: true }
+        : replay;
+    peakPresetSpeed = peak;
+    loadRows("rpm\n0\n" + peak + "\n0", settings);
+  } else renderBatch();
 }
 $("replay-mode").addEventListener("change", (e) => {
   stop();
@@ -1250,10 +1322,18 @@ $("replay-preset").addEventListener("change", (e) => {
   const select = e.target as HTMLSelectElement;
   const preset = replayPresets.find(({ id }) => id === select.value);
   if (!preset) return;
-  loadRows(preset.csv, {
-    mode: "smooth",
-    keepMaxOutput: preset.id !== "mixed",
-  });
+  peakPresetSpeed = null;
+  $("replay-preset-note").textContent = "";
+  if (preset.csv === null) {
+    stop();
+    updatePeakSpeedPreset();
+  } else {
+    loadRows(preset.csv, {
+      ...replay,
+      mode: "smooth",
+      keepMaxOutput: preset.id !== "mixed",
+    });
+  }
 });
 function textFile(filename: string, content: string, type: string) {
   download(filename, new Blob([content], { type }));
@@ -1446,7 +1526,8 @@ $("file").addEventListener("change", async () => {
     if (importType === "map") loadMap(text, file.name);
     else if (importType === "batch") {
       loadRows(text);
-      $<HTMLSelectElement>("replay-preset").value = "";
+      resetPresetChoice();
+      renderBatch();
     } else {
       const v = readProject(text);
       stop();
@@ -1457,7 +1538,7 @@ $("file").addEventListener("change", async () => {
       o = v.o;
       speedRange = v.speedRange;
       setReplaySettings(v.replay ?? defaultReplay);
-      $<HTMLSelectElement>("replay-preset").value = "";
+      resetPresetChoice();
       name = v.name;
       mapName = v.mapName;
       rows = v.rows;
@@ -1561,6 +1642,9 @@ async function action(a: string) {
     case "play":
       playReplay();
       break;
+    case "replay-loop":
+      setReplaySettings({ ...replay, loop: !replay.loop });
+      break;
     case "export-menu":
       $("export-menu").hidden = !$("export-menu").hidden;
       $("export-btn").setAttribute(
@@ -1624,7 +1708,7 @@ async function action(a: string) {
     case "help":
       modal(
         "坐标约定与模型说明",
-        "<h3>输入与运行点</h3><p>转速为有符号机械转速。电流、电压均为相基波峰值。自动求点可按给定电磁转矩寻找最小电流。勾选「最大出力转矩」时，按当前转速和约束实时求最大出力，并显示电磁转矩乘机械角速度得到的机械转换功率。手动验点直接计算指定电流。P 表示选中的运行点或标明的边界点。</p><h3>稳态 dq 方程</h3><p>ω<sub>e</sub> = 2πpn / 60<br>V<sub>d</sub> = R<sub>s</sub>i<sub>d</sub> − ω<sub>e</sub>ψ<sub>q</sub>　　V<sub>q</sub> = R<sub>s</sub>i<sub>q</sub> + ω<sub>e</sub>ψ<sub>d</sub><br>T<sub>e</sub> = 1.5p (ψ<sub>d</sub>i<sub>q</sub> − ψ<sub>q</sub>i<sub>d</sub>)</p><h3>模型与约束</h3><p>默认使用常参数工程模型，并计入定子电阻。可关闭定子电阻或切换到理想模型进行对照。工程模型可按绕组温度修正铜阻，铜温度系数取 0.00393 / °C。磁链图以双线性插值计算总磁链。线性调制的相电压峰值上限，SVPWM 为 V<sub>dc</sub> / √3，SPWM 为 V<sub>dc</sub> / 2。常参数工程模型与磁链图模型可再乘以电压利用率 k<sub>v</sub>。直接给定电压上限时，求解使用输入的电压值。紫色六边形表示理想两电平逆变器可合成的平均电压范围，顶点幅值为 2V<sub>dc</sub> / 3。图中取转子电角度 0°，第一个顶点沿正 d 轴。橙色圆表示求解采用的电压限值。</p><h3>读图</h3><p>转矩–转速图默认显示零及正转矩，勾选「显示负转矩」即可查看完整包络。横轴默认随模型求得的可达转速边界调整，图下滑块与横轴同尺度。未找到有限边界时，横轴保留观察范围。可清空横轴范围输入框恢复自动估算。输入更高转速时横轴自动涵盖当前点。电流图的着色区域同时满足电流与电压约束。MTPA 是单位电流最大转矩轨迹。MTPV 是固定转速下，各电压幅值对应的最大正、负转矩点的轨迹。圆点对应当前电压限值，仍需结合电流极限判断是否可达。常参数模型计入当前电阻设置，非零转速时显示 MTPV。电压图将各项首尾相接，蓝色矢量是从原点指向合成端点的端电压。常参数模型依次连接永磁反电动势、电感电压和电阻压降。前两项的终点是旋转磁链电压。电感电压 V<sub>L</sub> 的 (d, q) 分量为 (−ω<sub>e</sub>L<sub>q</sub>i<sub>q</sub>, ω<sub>e</sub>L<sub>d</sub>i<sub>d</sub>)。磁链图模型使用当前工况的总磁链，显示 −ω<sub>e</sub>ψ<sub>q</sub> 在 d 轴上的分量和 ω<sub>e</sub>ψ<sub>d</sub> 在 q 轴上的分量。零值分量可在明细中查看。裕量等于极限减去实际幅值。</p><h3>工况回放</h3><p>可直接载入预设，也可导入工况 CSV 或只含 rpm 一列的转速表。平滑过渡缓入缓出，同类工况插值目标转矩或 dq 电流，混合给定方式使用两端 dq 电流衔接。勾选「保持最大出力」后，回放按每个转速重新求最大出力。分析、回放和导出复用同一模型。</p>",
+        "<h3>输入与运行点</h3><p>转速为有符号机械转速。电流、电压均为相基波峰值。自动求点可按给定电磁转矩寻找最小电流。勾选「最大出力转矩」时，按当前转速和约束实时求最大出力，并显示电磁转矩乘机械角速度得到的机械转换功率。手动验点直接计算指定电流。P 表示选中的运行点或标明的边界点。</p><h3>稳态 dq 方程</h3><p>ω<sub>e</sub> = 2πpn / 60<br>V<sub>d</sub> = R<sub>s</sub>i<sub>d</sub> − ω<sub>e</sub>ψ<sub>q</sub>　　V<sub>q</sub> = R<sub>s</sub>i<sub>q</sub> + ω<sub>e</sub>ψ<sub>d</sub><br>T<sub>e</sub> = 1.5p (ψ<sub>d</sub>i<sub>q</sub> − ψ<sub>q</sub>i<sub>d</sub>)</p><h3>模型与约束</h3><p>默认使用常参数工程模型，并计入定子电阻。可关闭定子电阻或切换到理想模型进行对照。工程模型可按绕组温度修正铜阻，铜温度系数取 0.00393 / °C。磁链图以双线性插值计算总磁链。线性调制的相电压峰值上限，SVPWM 为 V<sub>dc</sub> / √3，SPWM 为 V<sub>dc</sub> / 2。常参数工程模型与磁链图模型可再乘以电压利用率 k<sub>v</sub>。直接给定电压上限时，求解使用输入的电压值。紫色六边形表示理想两电平逆变器可合成的平均电压范围，顶点幅值为 2V<sub>dc</sub> / 3。图中取转子电角度 0°，第一个顶点沿正 d 轴。橙色圆表示求解采用的电压限值。</p><h3>读图</h3><p>转矩–转速图默认显示零及正转矩，勾选「显示负转矩」即可查看完整包络。横轴默认随模型求得的可达转速边界调整，图下滑块与横轴同尺度。未找到有限边界时，横轴保留观察范围。可清空横轴范围输入框恢复自动估算。输入更高转速时横轴自动涵盖当前点。电流图的着色区域同时满足电流与电压约束。MTPA 是单位电流最大转矩轨迹。MTPV 是固定转速下，各电压幅值对应的最大正、负转矩点的轨迹。圆点对应当前电压限值，仍需结合电流极限判断是否可达。常参数模型计入当前电阻设置，非零转速时显示 MTPV。电压图将各项首尾相接，蓝色矢量是从原点指向合成端点的端电压。常参数模型依次连接永磁反电动势、电感电压和电阻压降。前两项的终点是旋转磁链电压。电感电压 V<sub>L</sub> 的 (d, q) 分量为 (−ω<sub>e</sub>L<sub>q</sub>i<sub>q</sub>, ω<sub>e</sub>L<sub>d</sub>i<sub>d</sub>)。磁链图模型使用当前工况的总磁链，显示 −ω<sub>e</sub>ψ<sub>q</sub> 在 d 轴上的分量和 ω<sub>e</sub>ψ<sub>d</sub> 在 q 轴上的分量。零值分量可在明细中查看。裕量等于极限减去实际幅值。</p><h3>工况回放</h3><p>可直接载入预设，也可导入工况 CSV 或只含 rpm 一列的转速表。「0 → 最高速 → 0」按当前约束估算正转上限。未找到有限上限时使用横轴范围。开启「循环回放」后，序列会重复播放。平滑过渡缓入缓出，同类工况插值目标转矩或 dq 电流，混合给定方式使用两端 dq 电流衔接。勾选「保持最大出力」后，回放按每个转速重新求最大出力。分析、回放和导出复用同一模型。</p>",
       );
       break;
   }

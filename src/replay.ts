@@ -3,6 +3,7 @@ import { isMaxOutput, type Operation, type Point } from "./model.ts";
 export interface ReplaySettings {
   mode: "step" | "smooth";
   keepMaxOutput: boolean;
+  loop?: boolean;
 }
 
 export const defaultReplay: ReplaySettings = {
@@ -15,6 +16,14 @@ type Current = Pick<Point, "d" | "q">;
 
 export function commandType(op: Operation) {
   return isMaxOutput(op) ? "max-output" : op.mode;
+}
+
+export function sameReplayCommand(from: Operation, to: Operation) {
+  if (from.rpm !== to.rpm || commandType(from) !== commandType(to))
+    return false;
+  return from.mode === "manual"
+    ? from.id === to.id && from.iq === to.iq
+    : isMaxOutput(from) || from.torque === to.torque;
 }
 
 export function replayOperation(op: Operation | null, keepMaxOutput: boolean) {

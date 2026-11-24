@@ -4,6 +4,7 @@ import { readFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaults, initial, solve } from "../src/model.ts";
+import { estimateSpeedRange } from "../src/tn.ts";
 const downloadDir = await mkdtemp(join(tmpdir(), "fluxlab-test-"));
 const desktop = process.env.ELECTRON_BIN
   ? await _electron.launch({
@@ -297,6 +298,7 @@ try {
   assert.deepEqual(await preset.locator("option").allTextContents(), [
     "载入预设",
     "升降速",
+    "0 → 最高速 → 0",
     "高速区扫描",
     "正反转",
     "混合工况示例",
@@ -363,9 +365,102 @@ try {
   await wait("m-speed", "8,500");
   assert.equal(await replayMode.inputValue(), "smooth");
   assert.ok(await keepMaxOutput.isChecked());
+
+  const loop = page.getByRole("button", { name: "循环回放" });
+  const peakRow = page.locator("#batch-list tr[data-row='1'] td:nth-child(3)");
+  const waitForPeak = (rpm) =>
+    page.waitForFunction(
+      (expected) =>
+        Number(
+          document.querySelector("#batch-list tr[data-row='1'] td:nth-child(3)")
+            ?.textContent,
+        ) === expected,
+      rpm,
+    );
+  const peak = Math.floor(estimateSpeedRange(defaults).forwardLimit);
+  await preset.selectOption("peak-speed");
+  await waitForPeak(peak);
+  assert.deepEqual(
+    await page.locator("#batch-list tbody td:nth-child(3)").allTextContents(),
+    ["0", String(peak), "0"],
+  );
+  assert.equal(await replayMode.inputValue(), "smooth");
+  assert.ok(await keepMaxOutput.isChecked());
+  assert.equal(await loop.getAttribute("aria-pressed"), "false");
+  await loop.click();
+  assert.equal(await loop.getAttribute("aria-pressed"), "true");
+  assert.equal(JSON.parse(await grab("save")).replay.loop, true);
+  await page.evaluate(() => {
+    const list = document.getElementById("batch-list");
+    const record = () => {
+      const index = list.querySelector("tr.active")?.dataset.row;
+      if (index && index !== window.replayRows.at(-1))
+        window.replayRows.push(index);
+    };
+    window.replayRows = [];
+    record();
+    new MutationObserver(record).observe(list, { childList: true });
+  });
+  await by("play").click();
+  await page.waitForFunction(() => window.replayRows.length >= 5);
+  assert.deepEqual(await page.evaluate(() => window.replayRows.slice(0, 5)), [
+    "0",
+    "1",
+    "2",
+    "0",
+    "1",
+  ]);
+  await loop.click();
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[data-action="play"]')
+        .getAttribute("aria-label") === "播放",
+  );
+  await wait("live", "实时求解");
+  assert.equal(await page.evaluate(readSpeed), 0);
+  assert.equal(
+    await page.locator("#batch-list tr.active").getAttribute("data-row"),
+    "2",
+  );
+
+  await busVoltage.fill("200");
+  await busVoltage.press("Enter");
+  const reducedPeak = Math.floor(
+    estimateSpeedRange({ ...defaults, vdc: 200 }).forwardLimit,
+  );
+  await waitForPeak(reducedPeak);
+  assert.ok(Number(await peakRow.innerText()) < peak);
+
+  const currentLimit = page.locator("#n-imax");
+  await currentLimit.fill("260");
+  await currentLimit.press("Enter");
+  await rangeInput.fill("16000");
+  await rangeInput.press("Enter");
+  await waitForPeak(16000);
+  await wait("replay-preset-note", "使用横轴范围");
+
+  await file("batch-import", {
+    name: "loop.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("rpm\n1000\n3000"),
+  });
+  await waitForPeak(3000);
+  await loop.click();
+  await by("play").click();
+  await wait("replay-status", "第 3 → 2 行");
+  await page.waitForFunction(() => {
+    const rpm = Number(
+      document.getElementById("m-speed").textContent.replaceAll(",", ""),
+    );
+    return rpm > 1300 && rpm < 2700;
+  });
+  await by("play").click();
+  await wait("live", "实时求解");
+  assert.equal(await loop.getAttribute("aria-pressed"), "true");
   assert.deepEqual(errors, []);
   console.log(
-    "Passed interaction, dual solvers, map, overshoot, stepped and smooth replay, presets, invalid rows, PNG/CSV, project save/reopen, reset, automatic speed range and signed torque display.",
+    "Passed interaction, dual solvers, map, overshoot, stepped, smooth and loop replay, presets, invalid rows, PNG/CSV, project save/reopen, reset, automatic speed range and signed torque display.",
   );
 } finally {
   if (desktop) await desktop.close();

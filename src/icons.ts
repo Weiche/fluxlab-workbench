@@ -34,6 +34,8 @@ const paths: Record<string, string> = {
   prev: '<path d="m16 5-8 7 8 7M5 5v14"/>',
   next: '<path d="m8 5 8 7-8 7M19 5v14"/>',
   pause: '<path d="M8 4v16m8-16v16"/>',
+  repeat:
+    '<path d="m17 2 4 4-4 4M3 11V8a2 2 0 0 1 2-2h16M7 22l-4-4 4-4M21 13v3a2 2 0 0 1-2 2H3"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v.1"/>',
   activity: '<path d="M2 12h4l3-7 5 14 3-7h5"/>',
   link: '<path d="m9 15 6-6M8 13l-2 2a3 3 0 0 0 4 4l3-3m-2-8 3-3a3 3 0 0 1 4 4l-2 2"/>',

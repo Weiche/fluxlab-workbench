@@ -209,7 +209,8 @@ export function readProject(text: string): Project {
     replay !== undefined &&
     (!replay ||
       (replay.mode !== "step" && replay.mode !== "smooth") ||
-      typeof replay.keepMaxOutput !== "boolean")
+      typeof replay.keepMaxOutput !== "boolean" ||
+      (replay.loop !== undefined && typeof replay.loop !== "boolean"))
   )
     throw Error("项目回放设置无效");
   return {
