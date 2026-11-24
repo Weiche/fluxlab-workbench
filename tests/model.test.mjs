@@ -14,6 +14,11 @@ import { readMap, readBatch, readProject } from "../src/files.ts";
 import { inverterHexagonAtZero, voltageComponents } from "../src/voltage.ts";
 import { mathHtml } from "../src/notation.ts";
 import { estimateSpeedRange, speedSpan, torqueEnvelope } from "../src/tn.ts";
+import {
+  interpolateCommand,
+  replayOperation,
+  replayTransition,
+} from "../src/replay.ts";
 import { mtpvTrajectory } from "../src/mtpv.ts";
 const close = (a, b, e = 1e-5) =>
   assert.ok(Math.abs(a - b) <= e, `${a} != ${b}`);
@@ -28,6 +33,54 @@ test("the default example solves with winding resistance", () => {
   close(resistance(defaults), 0.045);
   close(Math.hypot(x.rd, x.rq), defaults.rs * x.current);
   assert.ok(x.voltage > solve(ideal, initial).point.voltage);
+});
+test("smooth replay eases speed and target torque while keeping the endpoints", () => {
+  const start = { ...initial, rpm: 1000, torque: 20 };
+  const end = { ...initial, rpm: 5000, torque: 60 };
+  const commands = replayTransition(start, end, null, null);
+  assert.deepEqual(interpolateCommand(commands, 0), start);
+  assert.deepEqual(interpolateCommand(commands, 1), end);
+  const early = interpolateCommand(commands, 0.25);
+  close(early.rpm, 1625);
+  close(early.torque, 26.25);
+  const halfway = interpolateCommand(commands, 0.5);
+  close(halfway.rpm, 3000);
+  close(halfway.torque, 40);
+});
+test("mixed replay uses solved dq currents and maximum-output replay only interpolates speed", () => {
+  const start = { ...initial, rpm: 1000, torque: 20 };
+  const end = { ...initial, rpm: -5000, mode: "manual", id: -40, iq: -60 };
+  assert.equal(replayTransition(start, end, null, null), null);
+  const commands = replayTransition(start, end, { d: -10, q: 30 }, null);
+  const current = interpolateCommand(commands, 0.5);
+  assert.equal(current.mode, "manual");
+  close(current.id, -25);
+  close(current.iq, -15);
+  close(current.rpm, -2000);
+  const maximum = interpolateCommand(
+    replayTransition(
+      replayOperation(start, true),
+      replayOperation(end, true),
+      null,
+      null,
+    ),
+    0.5,
+  );
+  assert.equal(maximum.mode, "auto");
+  assert.equal(maximum.maxOutput, true);
+  close(maximum.rpm, -2000);
+  assert.ok(solve(defaults, maximum).point.torque < 0);
+});
+test("speed-only and explicit maximum-output CSV rows preserve signed speed and reject invalid values", () => {
+  const rows = readBatch("rpm\n1000\ninvalid\n-3000");
+  assert.deepEqual(
+    rows.map((row) => row.op?.rpm),
+    [1000, undefined, -3000],
+  );
+  assert.equal(rows[2].op.maxOutput, true);
+  assert.deepEqual(rows[2].raw, ["max-output", "-3000", "", "", ""]);
+  const normal = readBatch("mode,rpm,torque_Nm,id_A,iq_A\nmax-output,6500,,,");
+  assert.equal(normal[0].op.maxOutput, true);
 });
 test("the speed axis follows the machine, the requested range and the operating speed", () => {
   const span = speedSpan(defaults, initial.rpm);
