@@ -361,7 +361,7 @@ function sidebar() {
     maxOutput = isMaxOutput(o),
     map = p.model === "map";
   const torqueControl =
-    '<div><label class="check"><input id="max-output" type="checkbox"' +
+    '<div class="operation-torque"><label class="check"><input id="max-output" type="checkbox"' +
     (maxOutput ? " checked" : "") +
     ">最大出力转矩</label>" +
     (maxOutput ? field("torque", true) : range("torque", -120, 120, 0.5)) +
