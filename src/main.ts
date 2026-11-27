@@ -6,6 +6,7 @@ import {
   limit,
   isMaxOutput,
   pwmMethods,
+  resistanceMarginLabel,
   statusText,
   type Parameters,
   type Operation,
@@ -432,6 +433,26 @@ function sidebar() {
     range("imax", 1, 400, 1) +
     flag("direct", "直接给定可用电压上限");
   $<HTMLSelectElement>("model-choice").value = p.model;
+  const ideal = p.model === "ideal";
+  const withResistance = p.model === "engineering" && p.useR;
+  const canChooseSolver = mode && !maxOutput && (ideal || withResistance);
+  let solverOptions = "<option>直接计算</option>";
+  if (mode) {
+    const options = [["numeric", "数值法"]];
+    let selected = "numeric";
+    if (canChooseSolver && ideal) {
+      options.unshift(["analytic", "解析法"]);
+      selected = p.solver;
+    } else if (canChooseSolver && withResistance) {
+      options.push(["analytic-margin", resistanceMarginLabel]);
+      selected = p.engineeringSolver;
+    }
+    solverOptions = options
+      .map(([value, label]) =>
+        `<option value="${value}"${value === selected ? " selected" : ""}>${label}</option>`,
+      )
+      .join("");
+  }
   const model =
     (map
       ? '<div class="note file-name">' +
@@ -444,22 +465,12 @@ function sidebar() {
         : ""
       : "") +
     '<div class="field"><label for="solver">求解器</label><select id="solver" ' +
-    (p.model !== "ideal" || !mode || maxOutput ? "disabled" : "") +
+    (canChooseSolver ? "" : "disabled") +
     ">" +
-    (mode
-      ? '<option value="analytic" ' +
-        (p.model === "ideal" && !maxOutput && p.solver === "analytic"
-          ? "selected"
-          : "") +
-        '>解析法</option><option value="numeric" ' +
-        (p.model !== "ideal" || maxOutput || p.solver === "numeric"
-          ? "selected"
-          : "") +
-        ">数值法</option>"
-      : "<option>直接计算</option>") +
+    solverOptions +
     "</select></div>" +
-    (p.model !== "ideal" && mode
-      ? '<p class="note">含实际因素或查表磁链时使用数值法。</p>'
+    (canChooseSolver && withResistance
+      ? '<p class="note">预留压降后求点，再按完整带电阻方程复核。</p>'
       : "");
   $("side").innerHTML =
     section("oper", "运行工况", "target", op) +
@@ -723,7 +734,16 @@ function renderFrame() {
       ? "目标 " + f(op.torque, 1) + " N·m"
       : "由给定电流计算";
   $("f-current").textContent = "极限 " + f(v.imax, 1) + " A";
-  $("f-voltage").textContent = "极限 " + f(limit(v), 1) + " V";
+  const analyticLimit = r.analyticVoltageLimit;
+  let voltageSummary = "极限 " + f(limit(v), 1) + " V";
+  if (analyticLimit !== undefined) {
+    voltageSummary +=
+      analyticLimit === null
+        ? " · 解析上限不可用"
+        : " · 解析上限 " + f(analyticLimit) + " V";
+    if (x) voltageSummary += " · 实际裕量 " + f(x.vm, 2) + " V";
+  }
+  $("f-voltage").textContent = voltageSummary;
   $("f-speed").textContent =
     "电频率 " + f(Math.abs((op.rpm * v.poles) / 60), 1) + " Hz";
   $("method").textContent = r.method;
@@ -789,6 +809,8 @@ function renderFrame() {
     margin("电流裕量", x?.im, v.imax, "A", "") +
     margin("电压裕量", x?.vm, limit(v), "V", "blue");
   let note = notes[r.status] ?? "";
+  if (analyticLimit !== undefined && r.method !== resistanceMarginLabel)
+    note = ("预留压降后未得到可行解析解，已回退完整数值法。 " + note).trimEnd();
   if (maxOutput && r.status === "coverage")
     note = "磁链图未覆盖完整电流范围，当前显示表内搜索结果。";
   if (maxOutput && r.status === "ok") {
@@ -954,7 +976,10 @@ $("side").addEventListener("change", (e) => {
     return;
   }
   if (el.id === "solver") {
-    p = { ...p, solver: el.value as Parameters["solver"] };
+    p =
+      p.model === "engineering"
+        ? { ...p, engineeringSolver: el.value as Parameters["engineeringSolver"] }
+        : { ...p, solver: el.value as Parameters["solver"] };
     enqueue(true);
     return;
   }
@@ -1809,7 +1834,7 @@ async function action(a: string) {
     case "help":
       modal(
         "坐标约定与模型说明",
-        "<h3>输入与运行点</h3><p>转速为有符号机械转速。电流、电压均为相基波峰值。自动求点可按给定电磁转矩寻找最小电流。勾选「最大出力转矩」时，按当前转速和约束实时求最大出力，并显示电磁转矩乘机械角速度得到的机械转换功率。手动验点直接计算指定电流。P 表示选中的运行点或标明的边界点。</p><h3>稳态 dq 方程</h3><p>ω<sub>e</sub> = 2πpn / 60<br>V<sub>d</sub> = R<sub>s</sub>i<sub>d</sub> − ω<sub>e</sub>ψ<sub>q</sub>　　V<sub>q</sub> = R<sub>s</sub>i<sub>q</sub> + ω<sub>e</sub>ψ<sub>d</sub><br>T<sub>e</sub> = 1.5p (ψ<sub>d</sub>i<sub>q</sub> − ψ<sub>q</sub>i<sub>d</sub>)</p><h3>模型与约束</h3><p>默认使用常参数工程模型，并计入定子电阻。可关闭定子电阻或切换到理想模型进行对照。工程模型可按绕组温度修正铜阻，铜温度系数取 0.00393 / °C。磁链图以双线性插值计算总磁链。线性调制的相电压峰值上限，SVPWM 为 V<sub>dc</sub> / √3，SPWM 为 V<sub>dc</sub> / 2。常参数工程模型与磁链图模型可再乘以电压利用率 k<sub>v</sub>。直接给定电压上限时，求解使用输入的电压值。紫色六边形表示理想两电平逆变器可合成的平均电压范围，顶点幅值为 2V<sub>dc</sub> / 3。图中取转子电角度 0°，第一个顶点沿正 d 轴。橙色圆表示求解采用的电压限值。</p><h3>读图</h3><p>转矩–转速图默认显示零及正转矩，勾选「显示负转矩」即可查看完整包络。横轴默认随模型求得的可达转速边界调整，图下滑块与横轴同尺度。未找到有限边界时，横轴保留观察范围。可清空横轴范围输入框恢复自动估算。输入更高转速时横轴自动涵盖当前点。电流图的着色区域同时满足电流与电压约束。MTPA 是单位电流最大转矩轨迹。MTPV 是固定转速下，各电压幅值对应的最大正、负转矩点的轨迹。圆点对应当前电压限值，仍需结合电流极限判断是否可达。常参数模型计入当前电阻设置，非零转速时显示 MTPV。电压图将各项首尾相接，蓝色矢量是从原点指向合成端点的端电压。常参数模型依次连接永磁反电动势、电感电压和电阻压降。前两项的终点是旋转磁链电压。电感电压 V<sub>L</sub> 的 (d, q) 分量为 (−ω<sub>e</sub>L<sub>q</sub>i<sub>q</sub>, ω<sub>e</sub>L<sub>d</sub>i<sub>d</sub>)。磁链图模型使用当前工况的总磁链，显示 −ω<sub>e</sub>ψ<sub>q</sub> 在 d 轴上的分量和 ω<sub>e</sub>ψ<sub>d</sub> 在 q 轴上的分量。零值分量可在明细中查看。裕量等于极限减去实际幅值。</p><h3>工况回放</h3><p>可直接载入预设，也可导入工况 CSV 或只含 rpm 一列的转速表。「0 → 最高速 → 0」按当前约束估算正转上限。未找到有限上限时使用横轴范围。开启「循环回放」后，序列会重复播放。平滑过渡缓入缓出，同类工况插值目标转矩或 dq 电流，混合给定方式使用两端 dq 电流衔接。勾选「保持最大出力」后，回放按每个转速重新求最大出力。分析、回放和导出复用同一模型。</p>",
+        "<h3>输入与运行点</h3><p>转速为有符号机械转速。电流、电压均为相基波峰值。自动求点可按给定电磁转矩寻找最小电流。勾选「最大出力转矩」时，按当前转速和约束实时求最大出力，并显示电磁转矩乘机械角速度得到的机械转换功率。手动验点直接计算指定电流。P 表示选中的运行点或标明的边界点。</p><h3>稳态 dq 方程</h3><p>ω<sub>e</sub> = 2πpn / 60<br>V<sub>d</sub> = R<sub>s</sub>i<sub>d</sub> − ω<sub>e</sub>ψ<sub>q</sub>　　V<sub>q</sub> = R<sub>s</sub>i<sub>q</sub> + ω<sub>e</sub>ψ<sub>d</sub><br>T<sub>e</sub> = 1.5p (ψ<sub>d</sub>i<sub>q</sub> − ψ<sub>q</sub>i<sub>d</sub>)</p><h3>模型与约束</h3><p>默认使用常参数工程模型，并计入定子电阻。可关闭定子电阻或切换到理想模型进行对照。工程模型可按绕组温度修正铜阻，铜温度系数取 0.00393 / °C。磁链图以双线性插值计算总磁链。线性调制的相电压峰值上限，SVPWM 为 V<sub>dc</sub> / √3，SPWM 为 V<sub>dc</sub> / 2。常参数工程模型与磁链图模型可再乘以电压利用率 k<sub>v</sub>。直接给定电压上限时，求解使用输入的电压值。常参数工程模型计入电阻时，可在给定目标转矩的自动求点中选择「解析法（预留电阻压降）」。程序按当前目标和限流计算解析电压上限，用完整带电阻方程复核运行点。如果解析法未得到可行点，则回退完整数值法。紫色六边形表示理想两电平逆变器可合成的平均电压范围，顶点幅值为 2V<sub>dc</sub> / 3。图中取转子电角度 0°，第一个顶点沿正 d 轴。橙色圆表示求解采用的电压限值。</p><h3>读图</h3><p>转矩–转速图默认显示零及正转矩，勾选「显示负转矩」即可查看完整包络。横轴默认随模型求得的可达转速边界调整，图下滑块与横轴同尺度。未找到有限边界时，横轴保留观察范围。可清空横轴范围输入框恢复自动估算。输入更高转速时横轴自动涵盖当前点。电流图的着色区域同时满足电流与电压约束。MTPA 是单位电流最大转矩轨迹。MTPV 是固定转速下，各电压幅值对应的最大正、负转矩点的轨迹。圆点对应当前电压限值，仍需结合电流极限判断是否可达。常参数模型计入当前电阻设置，非零转速时显示 MTPV。电压图将各项首尾相接，蓝色矢量是从原点指向合成端点的端电压。常参数模型依次连接永磁反电动势、电感电压和电阻压降。前两项的终点是旋转磁链电压。电感电压 V<sub>L</sub> 的 (d, q) 分量为 (−ω<sub>e</sub>L<sub>q</sub>i<sub>q</sub>, ω<sub>e</sub>L<sub>d</sub>i<sub>d</sub>)。磁链图模型使用当前工况的总磁链，显示 −ω<sub>e</sub>ψ<sub>q</sub> 在 d 轴上的分量和 ω<sub>e</sub>ψ<sub>d</sub> 在 q 轴上的分量。零值分量可在明细中查看。裕量等于极限减去实际幅值。</p><h3>工况回放</h3><p>可直接载入预设，也可导入工况 CSV 或只含 rpm 一列的转速表。「0 → 最高速 → 0」按当前约束估算正转上限。未找到有限上限时使用横轴范围。开启「循环回放」后，序列会重复播放。平滑过渡缓入缓出，同类工况插值目标转矩或 dq 电流，混合给定方式使用两端 dq 电流衔接。勾选「保持最大出力」后，回放按每个转速重新求最大出力。分析、回放和导出复用同一模型。</p>",
       );
       break;
   }

@@ -7,6 +7,7 @@ import {
   point,
   limit,
   resistance,
+  resistanceMarginLabel,
   omega,
   hasFeasibleCurrent,
 } from "../src/model.ts";
@@ -34,6 +35,61 @@ test("the default example solves with winding resistance", () => {
   close(resistance(defaults), 0.045);
   close(Math.hypot(x.rd, x.rq), defaults.rs * x.current);
   assert.ok(x.voltage > solve(ideal, initial).point.voltage);
+});
+test("resistance margin uses signed torque, effective resistance and the actual voltage limit", () => {
+  const p = {
+    ...defaults,
+    engineeringSolver: "analytic-margin",
+    useTemp: true,
+    useK: true,
+    pwm: "SPWM",
+    vdc: 340,
+  };
+  const r = resistance(p);
+  for (const rpm of [-3000, 3000]) {
+    const result = solve(p, { ...initial, rpm });
+    assert.equal(result.method, resistanceMarginLabel);
+    assert.equal(result.status, "ok");
+    const reserveSquared = (r * p.imax) ** 2 + 2 * r * omega(p, rpm) * 8;
+    close(result.analyticVoltageLimit, Math.sqrt(limit(p) ** 2 - reserveSquared));
+    const x = result.point;
+    close(x.torque, initial.torque);
+    close(x.vm, limit(p) - Math.hypot(x.ud, x.uq));
+    assert.ok(x.im >= 0 && x.vm > 0);
+    close(x.rd, r * x.d);
+  }
+  const weakened = solve(
+    { ...defaults, engineeringSolver: "analytic-margin" },
+    { ...initial, rpm: 5000, torque: 30 },
+  );
+  assert.equal(weakened.method, resistanceMarginLabel);
+  close(Math.hypot(weakened.point.ed, weakened.point.eq), weakened.analyticVoltageLimit);
+  assert.ok(weakened.point.vm >= 0);
+});
+test("a conservative voltage limit falls back without discarding feasible targets", () => {
+  const p = { ...defaults, engineeringSolver: "analytic-margin", direct: true };
+  for (const { rs, vmax, rpm, torque, bound } of [
+    { rs: 0.5, vmax: 70, rpm: 1500, torque: 10, bound: 15.899762539214297 },
+    { rs: 2, vmax: 10, rpm: 0, torque: 1, bound: null },
+  ]) {
+    const parameters = { ...p, rs, vmax };
+    const operation = { ...initial, rpm, torque };
+    const result = solve(parameters, operation);
+    const full = solve({ ...parameters, engineeringSolver: "numeric" }, operation);
+    assert.equal(result.method, "数值法（回退）");
+    assert.equal(result.status, "ok");
+    if (bound === null) assert.equal(result.analyticVoltageLimit, null);
+    else close(result.analyticVoltageLimit, bound);
+    assert.deepEqual(result.point, full.point);
+  }
+  const selected = { ...defaults, engineeringSolver: "analytic-margin" };
+  for (const op of [
+    { ...initial, maxOutput: true },
+    { ...initial, mode: "manual" },
+  ]) {
+    assert.deepEqual(solve(selected, op), solve(defaults, op));
+  }
+  assert.equal(solve({ ...selected, useR: false }, initial).method, "数值法");
 });
 test("cached flux fields still refresh voltage constraints", () => {
   const draw = (p) => geometry(p, initial.rpm, initial.torque, 160, 1, 40);
@@ -244,6 +300,17 @@ test("project round trip validates stored model, settings and imported map", () 
     mapName: "磁链.csv",
   };
   assert.deepEqual(readProject(JSON.stringify(v)).p, v.p);
+  const selected = { ...v.p, engineeringSolver: "analytic-margin" };
+  assert.deepEqual(readProject(JSON.stringify({ ...v, p: selected })).p, selected);
+  const old = { ...v.p };
+  delete old.engineeringSolver;
+  assert.equal(
+    readProject(JSON.stringify({ ...v, p: old })).p.engineeringSolver,
+    "numeric",
+  );
+  assert.throws(() =>
+    readProject(JSON.stringify({ ...v, p: { ...v.p, engineeringSolver: "analytic" } })),
+  );
   assert.throws(() =>
     readProject(JSON.stringify({ ...v, p: { ...v.p, poles: 0 } })),
   );

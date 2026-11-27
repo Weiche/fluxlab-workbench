@@ -198,6 +198,12 @@ export function readProject(text: string): Project {
     throw Error("工况数据无效");
   const pwm = p.pwm === undefined ? defaults.pwm : p.pwm;
   if (!pwmMethods.includes(pwm)) throw Error("项目调制方式无效");
+  const engineeringSolver =
+    p.engineeringSolver === undefined
+      ? defaults.engineeringSolver
+      : p.engineeringSolver;
+  if (engineeringSolver !== "numeric" && engineeringSolver !== "analytic-margin")
+    throw Error("项目工程模型求解器无效");
   const speedRange = v.speedRange;
   if (
     speedRange !== undefined &&
@@ -215,7 +221,7 @@ export function readProject(text: string): Project {
     throw Error("项目回放设置无效");
   return {
     name: v.name,
-    p: { ...p, pwm },
+    p: { ...p, pwm, engineeringSolver },
     o: v.o,
     rows: v.rows,
     mapName: v.mapName,
