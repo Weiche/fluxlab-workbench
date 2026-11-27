@@ -109,6 +109,17 @@ export function torqueEnvelope(
   return { samples, partial };
 }
 
+const speedBackgrounds = new WeakMap<
+  HTMLCanvasElement,
+  {
+    layer: HTMLCanvasElement;
+    key: string;
+    envelope: TorqueEnvelope | null;
+    rpm?: number;
+    torque?: number;
+  }
+>();
+
 export function drawSpeedChart(
   canvas: HTMLCanvasElement,
   span: number,
@@ -125,10 +136,6 @@ export function drawSpeedChart(
     pixelHeight = Math.round(height * dpr);
   if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
   if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
-  const ctx = canvas.getContext("2d")!;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, width, height);
-
   const left = speedAxis.left,
     right = width - speedAxis.right;
   const top = 25,
@@ -151,6 +158,19 @@ export function drawSpeedChart(
   const X = (speed: number) => left + ((speed / span + 1) / 2) * (right - left);
   const Y = (t: number) =>
     top + ((torqueMax - t) / (torqueMax - torqueMin)) * (bottom - top);
+  const key = [width, height, dpr, span, torqueStep, showNegative].join("/");
+  let background = speedBackgrounds.get(canvas);
+  if (
+    background?.key === key &&
+    background.envelope === envelope &&
+    background.rpm === rpm &&
+    background.torque === torque
+  )
+    return;
+  const foreground = canvas.getContext("2d")!;
+  foreground.setTransform(dpr, 0, 0, dpr, 0, 0);
+  let ctx = foreground;
+
   const labelFont = '"Segoe UI","Microsoft YaHei",sans-serif';
   function line(x1: number, y1: number, x2: number, y2: number, color: string) {
     ctx.strokeStyle = color;
@@ -159,81 +179,98 @@ export function drawSpeedChart(
     ctx.lineTo(x2, y2);
     ctx.stroke();
   }
-  ctx.font = "11px " + labelFont;
-  ctx.fillStyle = "#62748a";
-  ctx.textBaseline = "middle";
-  ctx.textAlign = "right";
-  ctx.lineWidth = 1;
-  for (let i = showNegative ? -tickCount : 0; i <= tickCount; i++) {
-    const t = i * torqueStep;
-    line(left, Y(t), right, Y(t), i === 0 ? "#a9b8c9" : "#e2e8ef");
-    ctx.fillText(String(+t.toPrecision(5)), left - 7, Y(t));
-  }
-  const halfTicks = width < 510 ? 1 : 2;
-  ctx.textAlign = "center";
-  for (let i = -halfTicks; i <= halfTicks; i++) {
-    const speed = (span * i) / halfTicks;
-    line(X(speed), top, X(speed), bottom, "#e2e8ef");
-    ctx.fillText(
-      speed.toLocaleString("en-US", { maximumFractionDigits: 1 }),
-      X(speed),
-      bottom + 11,
-    );
-  }
-  line(left, top, left, bottom, "#a9b8c9");
-  line(left, bottom, right, bottom, "#a9b8c9");
-  ctx.textAlign = "left";
-  for (const run of mathCanvasLayout(ctx, [...math.te, " (N·m)"], labelFont, 11)
-    .runs) {
-    ctx.font = run.fontSpec;
-    ctx.fillText(run.text, left + run.x, 11 + run.y);
-  }
-  ctx.font = "11px " + labelFont;
-  ctx.textAlign = "right";
-  ctx.fillText("n (rpm)", right, 11);
-
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(left, top, right - left, bottom - top);
-  ctx.clip();
-  ctx.beginPath();
-  for (let i = 1; i < samples.length; i++) {
-    const a = samples[i - 1],
-      b = samples[i];
-    if (
-      a.upper === null ||
-      a.lower === null ||
-      b.upper === null ||
-      b.lower === null
-    )
-      continue;
-    ctx.moveTo(X(a.rpm), Y(a.upper));
-    ctx.lineTo(X(b.rpm), Y(b.upper));
-    ctx.lineTo(X(b.rpm), Y(b.lower));
-    ctx.lineTo(X(a.rpm), Y(a.lower));
-    ctx.closePath();
-  }
-  ctx.fillStyle = "rgba(38, 125, 155, 0.12)";
-  ctx.fill();
-  ctx.lineWidth = 1.8;
-  ctx.strokeStyle = envelopeColor;
-  if (envelope?.partial) ctx.setLineDash([4, 3]);
-  for (const bound of ["upper", "lower"] as const) {
-    ctx.beginPath();
-    let connected = false;
-    for (const sample of samples) {
-      const torque = sample[bound];
-      if (torque === null) {
-        connected = false;
-      } else if (connected) {
-        ctx.lineTo(X(sample.rpm), Y(torque));
-      } else {
-        ctx.moveTo(X(sample.rpm), Y(torque));
-        connected = true;
-      }
+  if (background?.key !== key || background.envelope !== envelope) {
+    const layer = background?.layer ?? document.createElement("canvas");
+    layer.width = pixelWidth;
+    layer.height = pixelHeight;
+    background = { layer, key, envelope };
+    speedBackgrounds.set(canvas, background);
+    ctx = layer.getContext("2d")!;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.font = "11px " + labelFont;
+    ctx.fillStyle = "#62748a";
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "right";
+    ctx.lineWidth = 1;
+    for (let i = showNegative ? -tickCount : 0; i <= tickCount; i++) {
+      const t = i * torqueStep;
+      line(left, Y(t), right, Y(t), i === 0 ? "#a9b8c9" : "#e2e8ef");
+      ctx.fillText(String(+t.toPrecision(5)), left - 7, Y(t));
     }
-    ctx.stroke();
+    const halfTicks = width < 510 ? 1 : 2;
+    ctx.textAlign = "center";
+    for (let i = -halfTicks; i <= halfTicks; i++) {
+      const speed = (span * i) / halfTicks;
+      line(X(speed), top, X(speed), bottom, "#e2e8ef");
+      ctx.fillText(
+        speed.toLocaleString("en-US", { maximumFractionDigits: 1 }),
+        X(speed),
+        bottom + 11,
+      );
+    }
+    line(left, top, left, bottom, "#a9b8c9");
+    line(left, bottom, right, bottom, "#a9b8c9");
+    ctx.textAlign = "left";
+    for (const run of mathCanvasLayout(ctx, [...math.te, " (N·m)"], labelFont, 11)
+      .runs) {
+      ctx.font = run.fontSpec;
+      ctx.fillText(run.text, left + run.x, 11 + run.y);
+    }
+    ctx.font = "11px " + labelFont;
+    ctx.textAlign = "right";
+    ctx.fillText("n (rpm)", right, 11);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(left, top, right - left, bottom - top);
+    ctx.clip();
+    ctx.beginPath();
+    for (let i = 1; i < samples.length; i++) {
+      const a = samples[i - 1],
+        b = samples[i];
+      if (
+        a.upper === null ||
+        a.lower === null ||
+        b.upper === null ||
+        b.lower === null
+      )
+        continue;
+      ctx.moveTo(X(a.rpm), Y(a.upper));
+      ctx.lineTo(X(b.rpm), Y(b.upper));
+      ctx.lineTo(X(b.rpm), Y(b.lower));
+      ctx.lineTo(X(a.rpm), Y(a.lower));
+      ctx.closePath();
+    }
+    ctx.fillStyle = "rgba(38, 125, 155, 0.12)";
+    ctx.fill();
+    ctx.lineWidth = 1.8;
+    ctx.strokeStyle = envelopeColor;
+    if (envelope?.partial) ctx.setLineDash([4, 3]);
+    for (const bound of ["upper", "lower"] as const) {
+      ctx.beginPath();
+      let connected = false;
+      for (const sample of samples) {
+        const torque = sample[bound];
+        if (torque === null) {
+          connected = false;
+        } else if (connected) {
+          ctx.lineTo(X(sample.rpm), Y(torque));
+        } else {
+          ctx.moveTo(X(sample.rpm), Y(torque));
+          connected = true;
+        }
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
   }
+  background.rpm = rpm;
+  background.torque = torque;
+  ctx = foreground;
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, pixelWidth, pixelHeight);
+  ctx.drawImage(background.layer, 0, 0);
   ctx.restore();
   if (rpm === undefined) return;
   ctx.lineWidth = 1;

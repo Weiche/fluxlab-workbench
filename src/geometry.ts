@@ -72,6 +72,10 @@ function fields(p: Parameters, extent: number, ratio: number, height: number) {
     fd,
     fq,
     rpm: NaN,
+    resistance: NaN,
+    voltageLimit: NaN,
+    currentLimit: NaN,
+    voltageField: new Float64Array(count),
     voltage: [] as number[],
     mtpv: null as Mtpv | null,
     mask: new Uint8Array(height * width),
@@ -88,7 +92,12 @@ export function geometry(
 ): Geometry {
   if (
     !cached ||
-    cached.p !== p ||
+    cached.p.model !== p.model ||
+    cached.p.map !== p.map ||
+    cached.p.poles !== p.poles ||
+    cached.p.ld !== p.ld ||
+    cached.p.lq !== p.lq ||
+    cached.p.psi !== p.psi ||
     cached.extent !== extent ||
     cached.ratio !== ratio ||
     cached.height !== resolution
@@ -96,11 +105,16 @@ export function geometry(
     cached = fields(p, extent, ratio, resolution);
   const g = cached,
     { width, height, xExtent } = g;
-  if (g.rpm !== rpm) {
-    const voltage = new Float64Array(g.fd.length),
-      r = resistance(p),
-      w = omega(p, rpm),
-      V = limit(p);
+  const r = resistance(p);
+  const V = limit(p);
+  if (
+    g.rpm !== rpm ||
+    g.resistance !== r ||
+    g.voltageLimit !== V ||
+    g.currentLimit !== p.imax
+  ) {
+    const voltage = g.voltageField;
+    const w = omega(p, rpm);
     for (let j = 0; j <= height; j++)
       for (let i = 0; i <= width; i++) {
         const k = j * (width + 1) + i,
@@ -128,6 +142,9 @@ export function geometry(
     g.voltage = contour(voltage, 0, width, height, xExtent, extent);
     g.mtpv = mtpvTrajectory(p, rpm, xExtent, extent);
     g.rpm = rpm;
+    g.resistance = r;
+    g.voltageLimit = V;
+    g.currentLimit = p.imax;
   }
   return {
     extent,
