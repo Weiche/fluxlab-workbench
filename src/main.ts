@@ -198,6 +198,7 @@ $("app").innerHTML =
   <div id="batch-list"></div>
 </section>
 <section class="metrics" aria-label="运行指标">${metric("torque", "电磁转矩", "torque", "#147f72", "N·m")}${metric("current", "电流幅值", "wave", "#3472b9", "A")}${metric("voltage", "电压幅值", "bolt", "#ba843b", "V")}${metric("speed", "机械转速", "speed", "#8371a6", "rpm")}</section>
+<div class="result-state" role="status"><span class="status" id="status">计算中</span><span id="state-note" hidden></span></div>
 <section class="card tn-card" id="tn-card" style="--tn-left:${speedAxis.left}px;--tn-right:${speedAxis.right}px">
   <div class="card-head"><span class="icon-tile blue">${icon("analysis")}</span><h2>转矩–转速</h2>
     <label class="check tn-toggle"><input id="tn-negative" type="checkbox" aria-controls="tn">显示负转矩</label>
@@ -208,7 +209,7 @@ $("app").innerHTML =
   <div class="legend tn-legend"><span><i style="--color:${envelopeColor}"></i>转矩包络</span><span id="tn-point-key"><i class="tn-marker"></i>运行点</span><span id="tn-hidden-point" hidden>当前运行点为负转矩</span><span id="tn-status" role="status"></span></div>
 </section>
 <div class="plots">${card("current", "电流平面约束分析", "grid", "")}${card("voltage", "电压平面矢量图", "vector", "blue")}</div>
-<section class="card detail-card"><div class="section-head"><span class="icon-tile">${icon("table")}</span><h2>运行点明细</h2><button class="cmp-toggle" data-action="compare" id="compare-btn">求解器对照 ${icon("right", 12)}</button><span class="status" id="status">计算中</span></div><div class="detail-body"><div class="values"><table class="data-table"><thead><tr><th>物理量</th><th>d 轴</th><th>q 轴</th><th>单位</th></tr></thead><tbody id="values"></tbody></table></div><div class="margins"><h3>约束裕量</h3><div id="margins"></div></div></div><div class="error-text" id="state-note" hidden></div></section>
+<section class="card detail-card"><div class="section-head"><span class="icon-tile">${icon("table")}</span><h2>运行点明细</h2><button class="cmp-toggle" data-action="compare" id="compare-btn">求解器对照 ${icon("right", 12)}</button></div><div class="detail-body"><div class="values"><table class="data-table"><thead><tr><th>物理量</th><th>d 轴</th><th>q 轴</th><th>单位</th></tr></thead><tbody id="values"></tbody></table></div><div class="margins"><h3>约束裕量</h3><div id="margins"></div></div></div></section>
 </main></div><footer class="bottom"><span class="live" id="live">实时求解</span><span id="method"></span><span>dq 同步坐标系</span><span class="push">幅值约定 · 相峰值</span><span>FluxLab 1.0</span></footer>
 <dialog id="dialog"><div class="section-head"><h2 id="dialog-title"></h2>${iconButton("close", "关闭", "close")}</div><div class="dialog-inner" id="dialog-body"></div></dialog><input id="file" type="file" hidden><div class="toast" id="toast" role="status" hidden></div>`;
 type Key = keyof typeof bounds;
@@ -467,16 +468,17 @@ let pending: {
 } | null = null;
 function drawTN() {
   const invalidRow = tab === "batch" && rowIndex >= 0 && !rows[rowIndex]?.op;
-  const rpm = playing && replayLeg?.commands && frame ? frame.o.rpm : o.rpm;
+  const rpm = invalidRow
+    ? undefined
+    : playing && replayLeg?.commands && frame
+      ? frame.o.rpm
+      : o.rpm;
   const torque =
-    !invalidRow && frame?.o.rpm === rpm ? frame.r.point?.torque : undefined;
+    frame && frame.o.rpm === rpm ? frame.r.point?.torque : undefined;
   const showNegative = $<HTMLInputElement>("tn-negative").checked;
   const hiddenPoint = !showNegative && (torque ?? 0) < 0;
-  const pointKey = $("tn-point-key");
-  if (pointKey.hidden !== hiddenPoint) {
-    pointKey.hidden = hiddenPoint;
-    $("tn-hidden-point").hidden = !hiddenPoint;
-  }
+  $("tn-point-key").hidden = torque === undefined || hiddenPoint;
+  $("tn-hidden-point").hidden = !hiddenPoint;
   drawSpeedChart($("tn"), tnSpan, rpm, torque, tnEnvelope, showNegative);
 }
 function syncSpeed() {
@@ -608,12 +610,12 @@ worker.onerror = (e) => {
   toast("求解线程异常 " + e.message);
 };
 function graphs() {
-  drawTN();
-  if (!frame) return;
   if (tab === "batch" && rowIndex >= 0 && !rows[rowIndex]?.op) {
     invalidRowView();
     return;
   }
+  drawTN();
+  if (!frame) return;
   chart($("current"), "current", frame);
   chart($("voltage"), "voltage", frame);
   if (expanded && $("zoom")) chart($("zoom"), expanded, frame);
@@ -630,6 +632,14 @@ const notes: Partial<Record<Result["status"], string>> = {
   outside: "给定电流超出磁链数据范围，电压与转矩无法计算。",
   over: "给定指令超过约束。图中与明细保留原电流指令。",
 };
+function showResultState(label: string, warning: boolean, note = "") {
+  const status = $("status");
+  const detail = $("state-note");
+  status.classList.toggle("warn", warning);
+  if (status.textContent !== label) status.textContent = label;
+  if (detail.textContent !== note) detail.textContent = note;
+  detail.hidden = !note;
+}
 function renderFrame() {
   if (!frame) return;
   const { p: v, o: op, r } = frame,
@@ -658,8 +668,6 @@ function renderFrame() {
   $("f-voltage").textContent = "极限 " + f(limit(v), 1) + " V";
   $("f-speed").textContent =
     "电频率 " + f(Math.abs((op.rpm * v.poles) / 60), 1) + " Hz";
-  $("status").textContent = statusText[r.status];
-  $("status").className = "status" + (r.status === "ok" ? "" : " warn");
   $("method").textContent = r.method;
   $("live").textContent = "实时求解";
   $("compare-btn").hidden =
@@ -729,8 +737,7 @@ function renderFrame() {
     else if (power != null && power <= 0)
       note = "此转速和约束下可行点均无法产生正机械转换功率。";
   }
-  $("state-note").hidden = !note;
-  $("state-note").textContent = note;
+  showResultState(statusText[r.status], r.status !== "ok", note);
   document
     .querySelectorAll<HTMLElement>(".mtpa")
     .forEach((el) => (el.hidden = v.model === "map"));
@@ -1104,6 +1111,7 @@ function playReplay() {
 function invalidRowView() {
   const row = rows[rowIndex];
   if (!row || row.op) return;
+  drawTN();
   for (const key of ["torque", "current", "voltage", "speed"]) {
     $("m-" + key).textContent = "—";
     $("f-" + key).textContent = "";
@@ -1121,13 +1129,10 @@ function invalidRowView() {
     ctx.fillText("当前行缺少有效工况", el.width / 2, el.height / 2);
     ctx.restore();
   }
-  $("status").textContent = "输入无效";
-  $("status").className = "status warn";
   $("values").innerHTML = "";
   $("margins").innerHTML = "";
   $("compare-btn").hidden = true;
-  $("state-note").hidden = false;
-  $("state-note").textContent = "第 " + row.line + " 行 · " + row.error;
+  showResultState("输入无效", true, "第 " + row.line + " 行 · " + row.error);
 }
 function selectRow(i: number) {
   if (i < 0 || i >= rows.length) return;
@@ -1391,13 +1396,9 @@ function exportCsv() {
     : [
         output(
           [
-            op.mode,
+            isMaxOutput(op) ? "max-output" : op.mode,
             String(op.rpm),
-            op.mode === "auto"
-              ? String(
-                  isMaxOutput(op) ? (frame.r.point?.torque ?? "") : op.torque,
-                )
-              : "",
+            op.mode === "auto" && !isMaxOutput(op) ? String(op.torque) : "",
             op.mode === "manual" ? String(op.id) : "",
             op.mode === "manual" ? String(op.iq) : "",
           ],

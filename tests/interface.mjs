@@ -190,6 +190,11 @@ try {
   assert.equal(await page.locator("tr.active").getAttribute("data-row"), "2");
   await by("export-menu").click();
   assert.equal((await grab("csv")).toString().trim().split("\n").length, 9);
+  await page.waitForFunction(
+    () => document.getElementById("tn-status").textContent !== "正在计算包络",
+  );
+  const speedImage = () => speedChart.evaluate((canvas) => canvas.toDataURL());
+  const previousSpeedImage = await speedImage();
   await file("batch-import", {
     name: "bad.csv",
     mimeType: "text/csv",
@@ -199,6 +204,9 @@ try {
   });
   await wait("status", "输入无效");
   assert.equal(await text("m-torque"), "—");
+  assert.ok(await page.locator("#tn-point-key").isHidden());
+  assert.notEqual(await speedImage(), previousSpeedImage);
+  assert.match(await text("state-note"), /第 2 行/);
   await by("next").click();
   await wait("m-torque", "24.0");
   await by("analysis").click();
@@ -218,6 +226,18 @@ try {
   assert.ok(await page.locator("#s-torque").isHidden());
   const maxProject = await grab("save");
   assert.equal(JSON.parse(maxProject).o.maxOutput, true);
+  await by("export-menu").click();
+  const maxCsv = await grab("csv");
+  assert.match(maxCsv.toString(), /^"max-output","3000","","","",/m);
+  await by("batch").click();
+  await file("batch-import", {
+    name: "single-max-output.csv",
+    mimeType: "text/csv",
+    buffer: maxCsv,
+  });
+  await wait("batch-list", "最大出力");
+  assert.ok(await maxOutput.isChecked());
+  await by("analysis").click();
 
   await page.locator("#n-rpm").fill("-4500");
   await page.locator("#n-rpm").press("Enter");

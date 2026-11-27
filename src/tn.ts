@@ -112,7 +112,7 @@ export function torqueEnvelope(
 export function drawSpeedChart(
   canvas: HTMLCanvasElement,
   span: number,
-  rpm: number,
+  rpm: number | undefined,
   torque: number | undefined,
   envelope: TorqueEnvelope | null,
   showNegative: boolean,
@@ -235,6 +235,7 @@ export function drawSpeedChart(
     ctx.stroke();
   }
   ctx.restore();
+  if (rpm === undefined) return;
   ctx.lineWidth = 1;
   ctx.setLineDash([4, 3]);
   line(X(rpm), top, X(rpm), bottom, "#16796b");

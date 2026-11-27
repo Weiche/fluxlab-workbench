@@ -626,10 +626,17 @@ h2 {
 .track.blue i {
   background: #5789ca;
 }
-.error-text {
+.result-state {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: -6px 0 12px;
   font-size: 12px;
   color: #9d5d16;
-  padding: 6px 16px 10px;
+}
+.result-state .status {
+  white-space: nowrap;
 }
 .bottom {
   background: #f9fbfc;
