@@ -80,6 +80,21 @@ try {
   assert.ok(await page.locator("#current + .legend .mtpv").isVisible());
   assert.equal(await page.locator("#model-choice").inputValue(), "engineering");
   assert.equal(await text("method"), "数值法");
+  const dInductance = page.locator("#n-ld");
+  await dInductance.fill("0.46");
+  await dInductance.press("Tab");
+  assert.equal(await page.evaluate(() => document.activeElement.id), "n-lq");
+  await dInductance.fill("0.45");
+  await dInductance.press("Tab");
+  const exportButton = by("export-menu");
+  await exportButton.focus();
+  await exportButton.press("Enter");
+  await page.keyboard.press("Tab");
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.action), "csv");
+  await page.keyboard.press("Escape");
+  assert.ok(await page.locator("#export-menu").isHidden());
+  assert.equal(await exportButton.getAttribute("aria-expanded"), "false");
+  assert.equal(await page.evaluate(() => document.activeElement.id), "export-btn");
   assert.ok(await page.getByLabel("计入定子电阻", { exact: true }).isChecked());
   assert.equal(
     await page
@@ -419,7 +434,12 @@ try {
     };
     window.replayRows = [];
     record();
-    new MutationObserver(record).observe(list, { childList: true });
+    new MutationObserver(record).observe(list, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["aria-current"],
+    });
   });
   await by("play").click();
   await page.waitForFunction(() => window.replayRows.length >= 5);
@@ -478,6 +498,25 @@ try {
   await by("play").click();
   await wait("live", "实时求解");
   assert.equal(await loop.getAttribute("aria-pressed"), "true");
+  await file("batch-import", {
+    name: "long.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("rpm\n" + Array.from({ length: 36 }, (_, i) => 100 * i).join("\n")),
+  });
+  const scroller = page.locator(".batch-table");
+  const farRow = page.locator('tr[data-row="27"]');
+  await farRow.scrollIntoViewIfNeeded();
+  await farRow.focus();
+  await farRow.press("Enter");
+  assert.equal(await farRow.getAttribute("aria-current"), "true");
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.row), "27");
+  assert.ok(await scroller.evaluate((element) => element.scrollTop > 0));
+  await by("next").click();
+  assert.equal(await page.locator("tr.active").getAttribute("data-row"), "28");
+  assert.ok(await scroller.evaluate((element) => {
+    const row = element.querySelector("tr.active").getBoundingClientRect();
+    return row.bottom <= element.getBoundingClientRect().bottom + 1;
+  }));
   assert.deepEqual(errors, []);
   console.log(
     "Passed interaction, dual solvers, map, overshoot, stepped, smooth and loop replay, presets, invalid rows, PNG/CSV, project save/reopen, reset, automatic speed range and signed torque display.",

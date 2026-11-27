@@ -799,6 +799,10 @@ dialog .plot {
 .batch-table tbody tr {
   cursor: pointer;
 }
+.batch-table tbody tr:focus-visible {
+  outline: 2px solid #159985;
+  outline-offset: -2px;
+}
 .batch-table tbody tr.active {
   background: #e6f5f0;
 }
