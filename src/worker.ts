@@ -36,7 +36,7 @@ self.onmessage = (e) => {
     const g =
       key === geomKey
         ? null
-        : geometry(p, o.rpm, target, extent, m.ratio, m.preview ? 86 : 136);
+        : geometry(p, o.rpm, target, extent, m.ratio, m.preview ? 64 : 136);
     geomKey = key;
     const comparison =
       m.compare && p.model === "ideal" && o.mode === "auto" && !isMaxOutput(o)

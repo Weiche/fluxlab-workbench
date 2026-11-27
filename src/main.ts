@@ -113,7 +113,8 @@ let tnSpan = 1,
   tnEstimate: SpeedRangeEstimate | undefined,
   tnEnvelope: TorqueEnvelope | null = null;
 let tnWorker: Worker | null = null,
-  tnTimer = 0;
+  tnTimer = 0,
+  tnNeedsEnvelope = false;
 let sentMap: Parameters["map"] = null;
 let lastG: Geometry | null = null,
   batchRevision = 0,
@@ -483,30 +484,53 @@ function syncSpeed() {
   const modelChanged = tnParameters !== p;
   if (modelChanged) tnEstimate = undefined;
   const extent = Math.max(Math.abs(o.rpm), replaySpan);
-  const span = speedSpan(p, extent, speedRange ?? tnEstimate?.span);
+  const automaticSpan = dragging && tnParameters ? tnSpan : tnEstimate?.span;
+  const span = speedSpan(p, extent, speedRange ?? automaticSpan);
   const slider = $<HTMLInputElement>("s-rpm");
-  slider.min = String(-span);
-  slider.max = String(span);
-  slider.value = String(o.rpm);
-  slider.style.setProperty("--pct", (1 + o.rpm / span) * 50 + "%");
+  if (slider.max !== String(span)) {
+    slider.min = String(-span);
+    slider.max = String(span);
+  }
+  const rpm = String(o.rpm);
+  if (slider.value !== rpm) slider.value = rpm;
+  const progress = (1 + o.rpm / span) * 50 + "%";
+  if (slider.style.getPropertyValue("--pct") !== progress)
+    slider.style.setProperty("--pct", progress);
   const rpmInput = $<HTMLInputElement>("n-rpm");
   const spanInput = $<HTMLInputElement>("n-speed-span");
-  if (document.activeElement !== rpmInput)
-    rpmInput.value = String(replayLeg?.commands ? +o.rpm.toFixed(1) : o.rpm);
+  if (document.activeElement !== rpmInput) {
+    const displayedRpm = replayLeg?.commands ? String(+o.rpm.toFixed(1)) : rpm;
+    if (rpmInput.value !== displayedRpm) rpmInput.value = displayedRpm;
+  }
   if (
-    document.activeElement !== spanInput ||
-    spanInput.value === displayedSpeedRange
+    displayedSpeedRange !== String(span) &&
+    (document.activeElement !== spanInput ||
+      spanInput.value === displayedSpeedRange)
   )
     displayedSpeedRange = spanInput.value = String(span);
-  if (modelChanged || tnSpan !== span) {
+  const envelopeChanged = modelChanged || tnSpan !== span;
+  if (envelopeChanged) {
     tnParameters = p;
     tnSpan = span;
     tnEnvelope = null;
+    if (!dragging && (!playing || !replayLeg?.commands)) drawTN();
+  }
+  // The operating point has priority while a parameter or speed is being dragged.
+  if (envelopeChanged || (dragging && (tnTimer || tnWorker))) {
     clearTimeout(tnTimer);
+    tnTimer = 0;
     tnWorker?.terminate();
     tnWorker = null;
+    tnNeedsEnvelope = true;
+  }
+  if (tnNeedsEnvelope && dragging) {
+    if ($("tn-status").textContent !== "拖动结束后更新包络")
+      $("tn-status").textContent = "拖动结束后更新包络";
+  } else if (tnNeedsEnvelope) {
+    tnNeedsEnvelope = false;
     $("tn-status").textContent = "正在计算包络";
     tnTimer = window.setTimeout(() => {
+      tnTimer = 0;
       const worker = new SpeedWorker();
       tnWorker = worker;
       worker.onmessage = ({ data }: MessageEvent<SpeedResponse>) => {
@@ -522,6 +546,7 @@ function syncSpeed() {
             ? ""
             : "计算范围内未找到有限转速边界";
         syncSpeed();
+        drawTN();
         updatePeakSpeedPreset();
       };
       worker.onerror = () => {
@@ -543,7 +568,6 @@ function syncSpeed() {
       });
     }, 120);
   }
-  if (!playing || !replayLeg?.commands) drawTN();
 }
 function enqueue(modelChange = false) {
   if (modelChange && tab === "batch") stop();
@@ -581,7 +605,7 @@ function send() {
     o,
     compare,
     preview: preview !== "",
-    ratio: plotRatio(),
+    ratio: currentPlotRatio,
   });
   sentRevision = revision;
   sentMap = p.map;
@@ -589,19 +613,19 @@ function send() {
 worker.onmessage = (e) => {
   busy = false;
   const m = e.data;
+  const completed = pending;
+  if (dirty) send();
   if (m.error) {
     toast(m.error);
-    if (dirty) send();
     return;
   }
   if (m.g) lastG = m.g;
-  if (pending && lastG) {
-    frame = { p: pending.p, o: m.o, r: m.r, g: lastG };
+  if (completed && lastG) {
+    frame = { p: completed.p, o: m.o, r: m.r, g: lastG };
     comparison = m.comparison;
     renderFrame();
-    $("live").textContent = pending.preview || "实时求解";
+    $("live").textContent = completed.preview || "实时求解";
   }
-  if (dirty) send();
 };
 worker.onerror = (e) => {
   busy = false;
@@ -638,6 +662,7 @@ function renderFrame() {
     invalidRowView();
     return;
   }
+  graphs();
   $("m-torque").textContent = f(x?.torque);
   $("m-current").textContent = f(x?.current);
   $("m-voltage").textContent = f(x?.voltage);
@@ -664,34 +689,36 @@ function renderFrame() {
   $("live").textContent = "实时求解";
   $("compare-btn").hidden =
     v.model !== "ideal" || op.mode !== "auto" || maxOutput;
-  const val = (
-    label: string,
-    a: number | undefined,
-    b: number | undefined,
-    u: string,
-  ) =>
-    "<tr><td>" +
-    label +
-    "</td><td>" +
-    f(a, 2) +
-    "</td><td>" +
-    f(b, 2) +
-    '</td><td class="unit">' +
-    u +
-    "</td></tr>";
-  $("values").innerHTML =
-    val(
+  const detailRows = [
+    [
       "定子电流",
       x?.d ?? (op.mode === "manual" ? op.id : undefined),
       x?.q ?? (op.mode === "manual" ? op.iq : undefined),
       "A",
-    ) +
-    val("端电压", x?.ud, x?.uq, "V") +
-    voltageComponents(v, op.rpm, x)
-      .map(({ label, symbol, ud, uq }) =>
-        val(label + " " + mathHtml(symbol), ud, uq, "V"),
+    ] as const,
+    ["端电压", x?.ud, x?.uq, "V"] as const,
+    ...voltageComponents(v, op.rpm, x).map(
+      ({ label, symbol, ud, uq }) =>
+        [label + " " + mathHtml(symbol), ud, uq, "V"] as const,
+    ),
+  ];
+  const detail = $<HTMLTableSectionElement>("values");
+  if (!detail.rows.length || detail.dataset.model !== v.model) {
+    detail.innerHTML = detailRows
+      .map(
+        ([label, , , unit]) =>
+          `<tr><td>${label}</td><td></td><td></td><td class="unit">${unit}</td></tr>`,
       )
       .join("");
+    detail.dataset.model = v.model;
+  }
+  detailRows.forEach(([, d, q], index) => {
+    const cells = detail.rows[index].cells;
+    const displayedD = f(d, 2);
+    const displayedQ = f(q, 2);
+    if (cells[1].textContent !== displayedD) cells[1].textContent = displayedD;
+    if (cells[2].textContent !== displayedQ) cells[2].textContent = displayedQ;
+  });
   const legendElement = $("voltage").nextElementSibling!;
   const legendKey = `${v.model}/${v.direct ? "direct" : v.pwm}`;
   if (legendElement.getAttribute("data-model") !== legendKey) {
@@ -737,7 +764,6 @@ function renderFrame() {
   document
     .querySelectorAll<HTMLElement>(".no-data")
     .forEach((el) => (el.hidden = v.model !== "map"));
-  graphs();
   if (compare) showComparison();
 }
 function plotRatio() {
@@ -749,9 +775,14 @@ function plotRatio() {
     Math.ceil(((w - 36) / Math.max(1, Math.min(w - 60, h - 35))) * 10) / 10,
   );
 }
+let currentPlotRatio = plotRatio();
 new ResizeObserver(() => {
   graphs();
-  enqueue();
+  const nextRatio = plotRatio();
+  if (currentPlotRatio !== nextRatio) {
+    currentPlotRatio = nextRatio;
+    enqueue();
+  }
 }).observe($("current"));
 function setNumber(key: Key, value: number) {
   if (

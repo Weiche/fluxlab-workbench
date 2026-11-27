@@ -25,6 +25,10 @@ const font = '"Inter","Segoe UI","Noto Sans CJK SC",sans-serif';
 const grid = "#e5eaf0",
   axis = "#9daaba",
   mono = '"Consolas","Liberation Mono",monospace';
+const maskCanvas = document.createElement("canvas");
+const maskContext = maskCanvas.getContext("2d")!;
+let maskImage: ImageData | undefined;
+
 export function chart(
   canvas: HTMLCanvasElement,
   kind: "current" | "voltage",
@@ -171,23 +175,23 @@ export function chart(
   c.rect(left, top, right - left, bottom - top);
   c.clip();
   if (current) {
-    const tmp = document.createElement("canvas");
-    tmp.width = g.width;
-    tmp.height = g.height;
-    const sc = tmp.getContext("2d")!,
-      im = sc.createImageData(g.width, g.height);
-    g.mask.forEach((v, i) => {
-      if (v) {
-        const k = 4 * i;
-        im.data[k] = v === 1 ? 219 : 239;
-        im.data[k + 1] = v === 1 ? 241 : 240;
-        im.data[k + 2] = v === 1 ? 235 : 242;
-        im.data[k + 3] = 255;
-      }
-    });
-    sc.putImageData(im, 0, 0);
+    if (maskImage?.width !== g.width || maskImage.height !== g.height) {
+      maskCanvas.width = g.width;
+      maskCanvas.height = g.height;
+      maskImage = maskContext.createImageData(g.width, g.height);
+    }
+    const pixels = maskImage.data;
+    for (let i = 0; i < g.mask.length; i++) {
+      const shade = g.mask[i];
+      const offset = 4 * i;
+      pixels[offset] = shade === 1 ? 219 : 239;
+      pixels[offset + 1] = shade === 1 ? 241 : 240;
+      pixels[offset + 2] = shade === 1 ? 235 : 242;
+      pixels[offset + 3] = shade ? 255 : 0;
+    }
+    maskContext.putImageData(maskImage, 0, 0);
     c.drawImage(
-      tmp,
+      maskCanvas,
       X(-g.xExtent),
       Y(g.extent),
       g.xExtent * s * 2,

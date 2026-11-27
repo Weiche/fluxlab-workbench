@@ -45,7 +45,7 @@ try {
   await page.waitForFunction(
     () =>
       document.querySelector("#model-meta").textContent.includes("磁链图") &&
-      document.querySelector("#method").textContent === "数值法",
+      document.querySelector("#values").textContent.includes("q 轴磁链项"),
   );
   const param = process.env.BENCH_PARAM || "torque";
   const stats = await page.evaluate(async (param) => {
@@ -132,6 +132,11 @@ try {
   assert.ok(stats.chartFps >= 30);
   assert.ok(stats.p95ms < 50);
   assert.ok(stats.settledMs < 300);
+  await page.waitForFunction(() => {
+    const status = document.querySelector("#tn-status").textContent;
+    return status !== "正在计算包络" && status !== "拖动结束后更新包络";
+  });
+  assert.notEqual(await page.locator("#tn-status").textContent(), "包络计算失败");
 } finally {
   await browser.close();
 }

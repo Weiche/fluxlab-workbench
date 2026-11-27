@@ -20,6 +20,7 @@ import {
   replayTransition,
 } from "../src/replay.ts";
 import { mtpvTrajectory } from "../src/mtpv.ts";
+import { geometry } from "../src/geometry.ts";
 const close = (a, b, e = 1e-5) =>
   assert.ok(Math.abs(a - b) <= e, `${a} != ${b}`);
 const ideal = { ...defaults, model: "ideal" };
@@ -33,6 +34,18 @@ test("the default example solves with winding resistance", () => {
   close(resistance(defaults), 0.045);
   close(Math.hypot(x.rd, x.rq), defaults.rs * x.current);
   assert.ok(x.voltage > solve(ideal, initial).point.voltage);
+});
+test("cached flux fields still refresh voltage constraints", () => {
+  const draw = (p) => geometry(p, initial.rpm, initial.torque, 160, 1, 40);
+  const first = draw(defaults);
+  const mask = first.mask.slice();
+  const reduced = draw({ ...defaults, vdc: 130 });
+  assert.notDeepEqual(reduced.voltage, first.voltage);
+  assert.notDeepEqual(reduced.mask, mask);
+  assert.deepEqual(reduced.torque, first.torque);
+  const restored = draw({ ...defaults });
+  assert.deepEqual(restored.voltage, first.voltage);
+  assert.deepEqual(restored.mask, mask);
 });
 test("smooth replay eases speed and target torque while keeping the endpoints", () => {
   const start = { ...initial, rpm: 1000, torque: 20 };
