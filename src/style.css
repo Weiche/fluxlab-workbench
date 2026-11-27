@@ -1049,6 +1049,7 @@ dialog .plot {
   }
   .details-action {
     gap: 6px;
+    flex-wrap: wrap;
   }
 }
 .legend i.unmapped {
@@ -1073,13 +1074,24 @@ dialog .plot {
   .dialog-inner {overflow-x:auto}
   .shell {height:calc(100dvh - 88px)}
 }
-/* Keep operating controls and both plots visible together in tablet portrait. */
 @media (pointer:coarse) and (orientation:portrait), (pointer:coarse) and (max-width:960px) {
   .shell {display:flex;flex-direction:column;height:auto;min-height:0;gap:12px;padding:14px}
   .shell main {display:contents}
   .page-head {order:-2;margin:0;flex-wrap:wrap}
   .shell aside, .shell.show-side aside {order:-1;display:block;border:1px solid var(--line);border-radius:8px;background:white;overflow:visible}
-  .shell .side-title {display:none}
+  .shell:not(.show-side) .side-title {display:none}
+  .shell.show-side aside {
+    max-height: min(34dvh, 320px);
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+  .shell .side-title {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    height: 45px;
+    padding: 0 10px;
+  }
   .shell .side-body, .shell.show-side .side-body {display:block;padding:0 14px}
   .shell:not(.show-side) .side-body details:not([data-group="oper"]) {display:none}
   .shell:not(.show-side) .side-body details[data-group="oper"] {border-bottom:0}
@@ -1090,18 +1102,42 @@ dialog .plot {
   .bottom {padding-bottom:env(safe-area-inset-bottom);height:auto;min-height:30px}
   header {padding-inline:12px;gap:8px}
   .brand span, .head-actions button span {display:none}
+  details[data-group="oper"] .group {padding-bottom: 8px}
+  details[data-group="oper"] .operation-torque {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 0 10px;
+    align-items: start;
+    margin-top: 5px;
+  }
+  .operation-torque > .check {
+    min-height: 44px;
+    margin: 0;
+  }
+  .operation-torque > .range-field {margin: 0}
+  .operation-torque .range-top,
+  .operation-torque .field {flex-wrap: wrap}
   @media (min-width:600px) {
     details[data-group="oper"] .group {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 20px}
     details[data-group="oper"] .segmented {grid-column:1/-1;justify-self:start;min-width:210px}
     details[data-group="oper"] .range-field {margin:0}
+    details[data-group="oper"] .group:has(.operation-torque) {
+      grid-template-columns: auto minmax(0, 1fr);
+    }
+    details[data-group="oper"] .group:has(.operation-torque) .segmented {grid-column: auto}
+    details[data-group="oper"] .operation-torque {margin-top: 0}
   }
 }
-@media (pointer:coarse) and (max-width:580px) {
+@media (max-width:580px) {
   header {height:auto;min-height:58px;flex-wrap:wrap;gap:0 6px}
   .head-actions {gap:0}
   header nav {order:2;width:100%;height:44px}
+  header nav button {white-space: nowrap}
+}
+@media (pointer:coarse) and (max-width:580px) {
   .shell {padding:10px}
-  .details-action {flex-wrap:wrap}
+  .metrics {padding-block: 10px}
+  .metric-val {margin-top: 4px}
 }
 
 .tn-card {
@@ -1181,5 +1217,15 @@ dialog .plot {
 @media (max-width: 550px) {
   .tn-card .card-head { flex-wrap: wrap; }
   .tn-toggle { margin-left: auto; }
-  .tn-controls { width: 100%; }
+  .tn-controls {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .tn-field {
+    display: grid;
+    gap: 4px;
+  }
+  .tn-field .number input {width: 100%}
 }

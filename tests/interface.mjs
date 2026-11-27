@@ -521,6 +521,35 @@ try {
   console.log(
     "Passed interaction, dual solvers, map, overshoot, stepped, smooth and loop replay, presets, invalid rows, PNG/CSV, project save/reopen, reset, automatic speed range and signed torque display.",
   );
+  if (browser) {
+    const appUrl = process.env.APP_URL || "http://localhost:5173";
+    const narrow = await browser.newPage({ viewport: { width: 320, height: 700 } });
+    await narrow.goto(appUrl);
+    assert.ok(await narrow.evaluate(() =>
+      document.documentElement.scrollWidth === innerWidth &&
+      document.querySelector("[data-action=help]").getBoundingClientRect().right <= innerWidth,
+    ));
+    await narrow.close();
+
+    const tablet = await browser.newPage({
+      viewport: { width: 768, height: 1024 },
+      hasTouch: true,
+      isMobile: true,
+    });
+    await tablet.goto(appUrl);
+    await tablet.locator('[data-action="sidebar"]').tap();
+    const reset = tablet.locator('[data-action="reset"]');
+    assert.ok(await reset.isVisible());
+    assert.ok(await tablet.evaluate(() => {
+      const sidebar = document.querySelector("aside");
+      return matchMedia("(pointer: coarse)").matches &&
+        sidebar.scrollHeight > sidebar.clientHeight &&
+        document.querySelector("#s-rpm").getBoundingClientRect().bottom <= innerHeight;
+    }));
+    await reset.tap();
+    assert.ok(await tablet.getByRole("heading", { name: "恢复示例参数" }).isVisible());
+    await tablet.close();
+  }
 } finally {
   if (desktop) await desktop.close();
   if (browser) await browser.close();
