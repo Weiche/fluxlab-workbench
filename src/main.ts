@@ -183,7 +183,7 @@ const metric = (
 $("app").innerHTML =
   `<header><div class="brand"><img src="./flux.svg" alt=""><b>FluxLab</b><span>电机分析工作台</span></div><nav aria-label="工作区"><button data-action="analysis" id="nav-analysis" class="sel">${icon("analysis")}运行分析</button><button data-action="batch" id="nav-batch">${icon("batch")}工况回放</button></nav><div class="head-actions"><button data-action="open" title="打开项目">${icon("folder")}<span>打开项目</span></button><button data-action="save" title="保存项目">${icon("save")}<span>保存项目</span></button><i class="divider"></i>${iconButton("help", "使用说明", "help")}</div></header>
 <div class="shell" id="shell"><aside><div class="side-title">${icon("sliders", 18)}<strong>参数设置</strong>${iconButton("reset", "恢复示例参数", "reset")}</div><div class="side-body" id="side"></div></aside>
-<main><div class="page-head"><div><h1 id="page-title">稳态运行分析</h1><div class="project-meta">${icon("motor", 14)}<span id="project-name"></span><i></i><span id="model-meta"></span></div></div><div class="details-action"><label class="head-model">${icon("model", 14)}<select aria-label="模型" id="model-choice"><option value="engineering">常参数工程模型</option><option value="ideal">理想模型</option><option value="map">磁链图模型</option></select></label><button class="small-btn hide-side" data-action="sidebar" aria-expanded="false" aria-controls="side">${icon("sliders")}参数</button><div class="popup-wrap"><button class="btn primary" data-action="export-menu" aria-haspopup="true" aria-expanded="false" id="export-btn">${icon("export")}导出结果${icon("down", 12)}</button><div id="export-menu" class="menu" hidden><button data-action="csv">导出结果 CSV</button><button data-action="png">导出双图 PNG</button></div></div></div></div>
+<main><div class="page-head"><div><h1 id="page-title">稳态运行分析</h1><div class="project-meta">${icon("motor", 14)}<span id="project-name"></span><i></i><span id="model-meta"></span></div></div><div class="details-action"><label class="head-model">${icon("model", 14)}<select aria-label="模型" id="model-choice"><option value="engineering">常参数工程模型</option><option value="ideal">理想模型</option><option value="map">磁链图模型</option></select></label><button class="small-btn hide-side" data-action="sidebar" aria-expanded="false" aria-controls="side">${icon("sliders")}参数</button><div class="popup-wrap"><button class="btn primary" data-action="export-menu" aria-controls="export-menu" aria-expanded="false" id="export-btn">${icon("export")}导出结果${icon("down", 12)}</button><div id="export-menu" class="menu" hidden><button data-action="csv">导出结果 CSV</button><button data-action="png">导出双图 PNG</button></div></div></div></div>
 <section class="card batch-panel" id="batch-panel" hidden>
   <div class="section-head"><span class="icon-tile">${icon("batch")}</span><h2>工况序列</h2>
     <div class="batch-actions"><select id="replay-preset" aria-label="载入预设"><option value="" selected disabled>载入预设</option>${replayPresets.map(({ id, label }) => `<option value="${id}">${label}</option>`).join("")}</select><button class="small-btn" data-action="batch-import">${icon("folder", 14)}导入 CSV</button></div>
@@ -293,6 +293,8 @@ function field(k: Key, readOnly = false) {
 }
 function range(k: Key, lo: number, hi: number, step: number) {
   const val = source(k);
+  const defaultMin = lo;
+  const defaultMax = hi;
   lo = Math.min(val, lo);
   hi = Math.max(val, hi);
   return (
@@ -308,7 +310,11 @@ function range(k: Key, lo: number, hi: number, step: number) {
     k +
     '" aria-label="' +
     labels[k] +
-    '滑块" data-range="' +
+    '滑块" data-min="' +
+    defaultMin +
+    '" data-max="' +
+    defaultMax +
+    '" data-range="' +
     k +
     '" type="range" min="' +
     lo +
@@ -328,6 +334,22 @@ function range(k: Key, lo: number, hi: number, step: number) {
     unit[k] +
     "</span></div></div>"
   );
+}
+function syncRange(k: Key) {
+  const slider = $<HTMLInputElement>("s-" + k);
+  if (!slider) return;
+  const val = source(k);
+  const min = k === "id" || k === "iq" ? -p.imax : Number(slider.dataset.min);
+  const max = k === "id" || k === "iq" ? p.imax : Number(slider.dataset.max);
+  const lo = Math.min(min, val);
+  const hi = Math.max(max, val);
+  slider.min = String(lo);
+  slider.max = String(hi);
+  slider.value = String(val);
+  slider.style.setProperty("--pct", ((val - lo) / (hi - lo)) * 100 + "%");
+  const ends = slider.nextElementSibling!;
+  ends.firstElementChild!.textContent = String(lo);
+  ends.lastElementChild!.textContent = hi + " " + unit[k];
 }
 const flag = (k: "useR" | "useTemp" | "useK" | "direct", s: string) =>
   '<label class="check"><input type="checkbox" data-flag="' +
@@ -357,6 +379,8 @@ const section = (key: string, title: string, ic: string, html: string) =>
   html +
   "</div></details>";
 function sidebar() {
+  const active = document.activeElement as HTMLElement | null;
+  const focused = active && $("side").contains(active) ? active : null;
   const mode = o.mode === "auto",
     maxOutput = isMaxOutput(o),
     map = p.model === "map";
@@ -451,6 +475,15 @@ function sidebar() {
     );
   $("project-name").textContent = name;
   $("model-meta").textContent = modelNames[p.model] + " · " + p.poles + " 极对";
+  if (focused?.id) $(focused.id)?.focus({ preventScroll: true });
+  else if (focused?.dataset.action)
+    $("side")
+      .querySelector<HTMLElement>(`[data-action="${focused.dataset.action}"]`)
+      ?.focus({ preventScroll: true });
+  else if (focused?.dataset.flag)
+    $("side")
+      .querySelector<HTMLElement>(`[data-flag="${focused.dataset.flag}"]`)
+      ?.focus({ preventScroll: true });
 }
 function toast(t: string) {
   $("toast").textContent = t;
@@ -829,17 +862,24 @@ $("side").addEventListener("change", (e) => {
   const el = e.target as HTMLInputElement,
     k = el.dataset.number as Key;
   if (el.dataset.range) {
+    if (el.dataset.range === "imax") {
+      syncRange("id");
+      syncRange("iq");
+    }
     dragging = false;
     enqueue();
     if (tab === "batch" && !batchReady && !batchWorker) startBatch();
     return;
   }
   if (k) {
-    if (el.value === "" || !setNumber(k, +el.value)) {
+    if (el.value === "" || !setNumber(k, +el.value))
       toast(labels[k] + " 超出有效范围");
-      el.value = String(source(k));
+    el.value = String(source(k));
+    syncRange(k);
+    if (k === "imax") {
+      syncRange("id");
+      syncRange("iq");
     }
-    sidebar();
     return;
   }
   if (el.id === "max-output") {
@@ -1191,49 +1231,77 @@ function startBatch() {
   next();
   renderBatch();
 }
+let renderedRows: Row[] | undefined;
+let renderedResults: (Result | null)[] | undefined;
+let renderedResultCount = 0;
+let renderedKeepMaxOutput = false;
+
+function updateBatchRow(row: HTMLTableRowElement, i: number) {
+  const op = rowOperation(i);
+  const result = batchResults[i];
+  const mode = !op
+    ? "—"
+    : isMaxOutput(op)
+      ? "最大出力"
+      : op.mode === "auto"
+        ? "自动求点"
+        : "手动验点";
+  const command = !op || isMaxOutput(op)
+    ? "—"
+    : op.mode === "auto"
+      ? op.torque + " N·m"
+      : op.id + ", " + op.iq + " A";
+  const values = [
+    mode,
+    String(op?.rpm ?? "—"),
+    command,
+    f(result?.point?.torque, 2),
+    rows[i].error || (result ? statusText[result.status] : "计算中"),
+  ];
+  values.forEach((value, column) => (row.cells[column + 1].textContent = value));
+}
+
 function renderBatch() {
   if (tab !== "batch") return;
-  $("batch-list").innerHTML = rows.length
-    ? '<div class="batch-table"><table class="data-table"><thead><tr><th>行</th><th>给定方式</th><th>机械转速 / rpm</th><th>给定值</th><th>转矩 / N·m</th><th>状态</th></tr></thead><tbody>' +
-      rows
-        .map((row, i) => {
-          const op = rowOperation(i),
-            r = batchResults[i];
-          return (
-            '<tr tabindex="0" data-row="' +
-            i +
-            '" class="' +
-            (rowIndex === i ? "active" : "") +
-            '"><td>' +
-            row.line +
-            "</td><td>" +
-            (op
-              ? isMaxOutput(op)
-                ? "最大出力"
-                : op.mode === "auto"
-                  ? "自动求点"
-                  : "手动验点"
-              : "—") +
-            "</td><td>" +
-            (op?.rpm ?? "—") +
-            "</td><td>" +
-            (op
-              ? isMaxOutput(op)
-                ? "—"
-                : op.mode === "auto"
-                  ? op.torque + " N·m"
-                  : op.id + ", " + op.iq + " A"
-              : "—") +
-            "</td><td>" +
-            f(r?.point?.torque, 2) +
-            "</td><td>" +
-            esc(row.error || (r ? statusText[r.status] : "计算中")) +
-            "</td></tr>"
-          );
-        })
-        .join("") +
-      "</tbody></table></div>"
-    : '<div class="batch-empty">选择预设或导入工况表。<a class="inline-link" href="./examples/operating-points.csv" download>工况 CSV 模板</a><a class="inline-link" href="./examples/playback-speeds.csv" download>转速 CSV 模板</a></div>';
+  const list = $("batch-list");
+  if (renderedRows !== rows) {
+    list.innerHTML = rows.length
+      ? '<div class="batch-table"><table class="data-table"><thead><tr><th>行</th><th>给定方式</th><th>机械转速 / rpm</th><th>给定值</th><th>转矩 / N·m</th><th>状态</th></tr></thead><tbody>' +
+        rows.map((row, i) => `<tr tabindex="0" data-row="${i}"><td>${row.line}</td><td></td><td></td><td></td><td></td><td></td></tr>`).join("") +
+        "</tbody></table></div>"
+      : '<div class="batch-empty">选择预设或导入工况表。<a class="inline-link" href="./examples/operating-points.csv" download>工况 CSV 模板</a><a class="inline-link" href="./examples/playback-speeds.csv" download>转速 CSV 模板</a></div>';
+    renderedRows = rows;
+    renderedResults = undefined;
+  }
+  const table = list.querySelector("table");
+  if (table) {
+    const body = table.tBodies[0];
+    const reset = renderedResults !== batchResults || renderedKeepMaxOutput !== replay.keepMaxOutput;
+    const end = reset ? rows.length : batchResults.length;
+    for (let i = reset ? 0 : renderedResultCount; i < end; i++)
+      updateBatchRow(body.rows[i], i);
+    renderedResults = batchResults;
+    renderedResultCount = batchResults.length;
+    renderedKeepMaxOutput = replay.keepMaxOutput;
+
+    const previous = body.querySelector("tr.active");
+    const current = body.rows.item(rowIndex);
+    if (previous !== current) {
+      previous?.classList.remove("active");
+      previous?.removeAttribute("aria-current");
+      if (current) {
+        current.classList.add("active");
+        current.setAttribute("aria-current", "true");
+        const scroller = table.parentElement!;
+        const viewport = scroller.getBoundingClientRect();
+        const row = current.getBoundingClientRect();
+        const top = viewport.top + table.tHead!.offsetHeight;
+        if (row.top < top) scroller.scrollTop += row.top - top;
+        else if (row.bottom > viewport.top + scroller.clientHeight)
+          scroller.scrollTop += row.bottom - viewport.top - scroller.clientHeight;
+      }
+    }
+  }
   for (const a of ["prev", "next", "play"]) {
     const b = document.querySelector<HTMLButtonElement>(
       "[data-action=" + a + "]",
@@ -1506,6 +1574,7 @@ function loadRows(text: string, settings = replay) {
   stop();
   setReplaySettings(settings);
   rows = fresh;
+  batchResults = [];
   batchReady = false;
   selectRow(0);
   startBatch();
@@ -1563,10 +1632,14 @@ async function settled() {
     await new Promise((resolve) => setTimeout(resolve, 8));
   }
 }
+function setExportMenu(open: boolean) {
+  $("export-menu").hidden = !open;
+  $("export-btn").setAttribute("aria-expanded", String(open));
+}
 async function action(a: string) {
   if (a !== "export-menu") {
-    $("export-menu").hidden = true;
-    $("export-btn").setAttribute("aria-expanded", "false");
+    setExportMenu(false);
+    if (a === "csv" || a === "png") $("export-btn").focus();
   }
   switch (a) {
     case "analysis":
@@ -1646,11 +1719,7 @@ async function action(a: string) {
       setReplaySettings({ ...replay, loop: !replay.loop });
       break;
     case "export-menu":
-      $("export-menu").hidden = !$("export-menu").hidden;
-      $("export-btn").setAttribute(
-        "aria-expanded",
-        String(!$("export-menu").hidden),
-      );
+      setExportMenu($("export-menu").hidden);
       break;
     case "csv":
       if (playing && replay.mode === "smooth") stop(true);
@@ -1732,10 +1801,7 @@ document.addEventListener("click", (e) => {
     stop();
     selectRow(+row.dataset.row!);
   }
-  if (!el.closest(".popup-wrap")) {
-    $("export-menu").hidden = true;
-    $("export-btn").setAttribute("aria-expanded", "false");
-  }
+  if (!el.closest(".popup-wrap")) setExportMenu(false);
 });
 $("dialog").addEventListener("click", (e) => {
   if (e.target === $("dialog")) close();
@@ -1746,7 +1812,11 @@ document.addEventListener("keydown", (e) => {
     stop();
     selectRow(+el.dataset.row);
   }
-  if (e.key === "Escape") $("export-menu").hidden = true;
+  if (e.key === "Escape" && !$("export-menu").hidden) {
+    e.preventDefault();
+    setExportMenu(false);
+    $("export-btn").focus();
+  }
 });
 sidebar();
 enqueue();
