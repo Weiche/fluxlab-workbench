@@ -517,9 +517,56 @@ try {
     const row = element.querySelector("tr.active").getBoundingClientRect();
     return row.bottom <= element.getBoundingClientRect().bottom + 1;
   }));
+  await by("analysis").click();
+  const previousMotor = await text("project-name");
+  await by("motor-presets").click();
+  const motorDialog = page.getByRole("dialog", { name: "电机预设" });
+  const motorChoice = motorDialog.getByLabel("厂商与型号");
+  assert.deepEqual(await motorChoice.locator("optgroup").evaluateAll(
+    (groups) => groups.map((group) => group.label),
+  ), ["低压直流母线", "高压直流母线"]);
+  await motorChoice.selectOption("emrax-228-hv-lc");
+  assert.match(await text("motor-preset-preview"), /830 V/);
+  assert.match(await text("motor-preset-preview"), /0\.175 \/ 0\.18 mH/);
+  await motorDialog.getByRole("button", { name: "取消" }).click();
+  assert.equal(await text("project-name"), previousMotor);
+
+  await by("motor-presets").click();
+  await motorChoice.selectOption("linmot-ec02-40-70");
+  assert.match(await text("motor-preset-preview"), /Ld = Lq/);
+  await by("apply-motor-preset").click();
+  await wait("m-torque", "0.120");
+  assert.equal(await text("status"), "可行运行点");
+  assert.equal(await text("project-name"), "LinMot EC02-40/70");
+  assert.equal(await page.locator("#n-vdc").inputValue(), "24");
+  assert.equal(await page.locator("#s-torque").getAttribute("max"), "0.2");
+  await by("batch").click();
+  assert.equal(await page.locator("#batch-list tbody tr").count(), 36);
+  await by("analysis").click();
+  const lowMotor = await grab("save");
+  assert.equal(JSON.parse(lowMotor).motorPresetId, "linmot-ec02-40-70");
+
+  await by("motor-presets").click();
+  await motorChoice.selectOption("emrax-228-hv-lc");
+  await by("apply-motor-preset").click();
+  await wait("m-torque", "80.0");
+  assert.equal(await text("status"), "可行运行点");
+  assert.equal(await page.locator("#n-vdc").inputValue(), "830");
+  assert.equal(await page.locator("#n-lq").inputValue(), "0.18");
+  await file("open", {
+    name: "catalog-motor.fluxlab.json",
+    mimeType: "application/json",
+    buffer: lowMotor,
+  });
+  await wait("m-torque", "0.120");
+  const catalogLink = page.getByRole("link", { name: "参考目录" });
+  assert.match(await catalogLink.getAttribute("href"), /^https:\/\/shop\.linmot\.com\//);
+  await by("motor-presets").click();
+  assert.equal(await motorChoice.inputValue(), "linmot-ec02-40-70");
+  await motorDialog.getByRole("button", { name: "取消" }).click();
   assert.deepEqual(errors, []);
   console.log(
-    "Passed interaction, dual solvers, map, overshoot, stepped, smooth and loop replay, presets, invalid rows, PNG/CSV, project save/reopen, reset, automatic speed range and signed torque display.",
+    "Passed interaction, dual solvers, map, overshoot, stepped, smooth and loop replay, catalog motor presets, invalid rows, PNG/CSV, project save/reopen, reset, automatic speed range and signed torque display.",
   );
   if (browser) {
     const appUrl = process.env.APP_URL || "http://localhost:5173";
@@ -529,6 +576,11 @@ try {
       document.documentElement.scrollWidth === innerWidth &&
       document.querySelector("[data-action=help]").getBoundingClientRect().right <= innerWidth,
     ));
+    await narrow.locator('[data-action="sidebar"]').click();
+    await narrow.locator('[data-action="motor-presets"]').click();
+    const narrowDialog = narrow.getByRole("dialog", { name: "电机预设" });
+    assert.ok(await narrowDialog.isVisible());
+    assert.ok(await narrowDialog.evaluate((element) => element.scrollWidth <= element.clientWidth));
     await narrow.close();
 
     const tablet = await browser.newPage({
