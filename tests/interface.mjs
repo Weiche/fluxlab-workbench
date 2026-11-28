@@ -532,6 +532,14 @@ try {
   assert.equal(await text("project-name"), previousMotor);
 
   await by("motor-presets").click();
+  await motorChoice.selectOption("anaheim-bly172s-24v-4000");
+  assert.match(await text("motor-preset-preview"), /3\.5 A（相峰值）/);
+  await by("apply-motor-preset").click();
+  await wait("m-torque", "0.100");
+  assert.equal(await text("status"), "可行运行点");
+  assert.equal(await page.locator("#n-imax").inputValue(), "3.5");
+
+  await by("motor-presets").click();
   await motorChoice.selectOption("linmot-ec02-40-70");
   assert.match(await text("motor-preset-preview"), /Ld = Lq/);
   await by("apply-motor-preset").click();

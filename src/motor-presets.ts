@@ -13,7 +13,8 @@ type MotorParameters = Pick<
   "poles" | "rs" | "ld" | "lq" | "psi" | "vdc" | "imax"
 >;
 type Winding =
-  | { lineResistance: number; lineInductance: number; lineEmfRmsPerKrpm: number }
+  | ({ lineResistance: number; lineInductance: number } &
+      ({ lineEmfRmsPerKrpm: number } | { flux: number }))
   | { phaseResistance: number; ld: number; lq: number; flux: number };
 
 interface CatalogMotor {
@@ -23,8 +24,7 @@ interface CatalogMotor {
   sources: [CatalogSource, ...CatalogSource[]];
   poles: number;
   busVoltage: number;
-  currentRms: number;
-  currentBasis: string;
+  current: { amps: number; basis: string; convention: "rms" | "phase-peak" };
   resistanceTemperature: number;
   winding: Winding;
   note?: string;
@@ -58,12 +58,33 @@ const catalog: CatalogMotor[] = [
     }],
     poles: 4,
     busVoltage: 24,
-    currentRms: 1.4,
-    currentBasis: "目录额定电流",
+    current: { amps: 1.4, basis: "目录额定电流", convention: "rms" },
     resistanceTemperature: 20,
     winding: { lineResistance: 6.8, lineInductance: 2.6, lineEmfRmsPerKrpm: 7.4 },
     note: "母线取目录转矩–转速图的 24 V DC 曲线。",
     operation: { rpm: 1000, torque: 0.12 },
+  },
+  {
+    id: "anaheim-bly172s-24v-4000",
+    name: "Anaheim Automation BLY172S-24V-4000",
+    voltageClass: "low",
+    sources: [
+      {
+        label: "Anaheim BLY17 系列规格表",
+        url: "https://anaheimautomation.com/media/anaheim/files/manuals/brushless/L010228_-_BLY17_Series_Spec_Sheet.pdf",
+      },
+      {
+        label: "Infineon FOC 参数，第 97、109 页",
+        url: "https://www.infineon.com/assets/row/public/documents/30/56/infineon-psoc-control-c3-motor-control-ctw-en.pdf",
+      },
+    ],
+    poles: 4,
+    busVoltage: 24,
+    current: { amps: 3.5, basis: "目录额定电流", convention: "phase-peak" },
+    resistanceTemperature: 20,
+    winding: { lineResistance: 0.8, lineInductance: 1.2, flux: 0.00572 },
+    note: "磁链采用 Infineon 对同型号的辨识值。电流按其 FOC 相峰值口径输入。目录电阻按 20 °C 参考值录入。",
+    operation: { rpm: 2000, torque: 0.1 },
   },
   {
     id: "beckhoff-am8121-f",
@@ -78,8 +99,7 @@ const catalog: CatalogMotor[] = [
     ],
     poles: 3,
     busVoltage: 48,
-    currentRms: 4,
-    currentBasis: "48 V DC 额定电流",
+    current: { amps: 4, basis: "48 V DC 额定电流", convention: "rms" },
     resistanceTemperature: 20,
     winding: { lineResistance: 1.6, lineInductance: 2.8, lineEmfRmsPerKrpm: 8 },
     note: "采用 21F 绕组的电机栏。搭配 EL7201 时，目录另列 2.8 A RMS。",
@@ -95,8 +115,7 @@ const catalog: CatalogMotor[] = [
     }],
     poles: 5,
     busVoltage: 320,
-    currentRms: 4.8,
-    currentBasis: "目录连续堵转电流",
+    current: { amps: 4.8, basis: "目录连续堵转电流", convention: "rms" },
     resistanceTemperature: 25,
     winding: { lineResistance: 2.51, lineInductance: 9.2, lineEmfRmsPerKrpm: 47.5 },
     note: "采用 320 V DC 性能栏。连续堵转电流对应绕组温升 100 °C。",
@@ -119,8 +138,7 @@ const catalog: CatalogMotor[] = [
     ],
     poles: 4,
     busVoltage: 560,
-    currentRms: 3.8,
-    currentBasis: "400 V AC 额定工况电流",
+    current: { amps: 3.8, basis: "400 V AC 额定工况电流", convention: "rms" },
     resistanceTemperature: 20,
     winding: { lineResistance: 3.7, lineInductance: 17.4, lineEmfRmsPerKrpm: 68 },
     note: "采用 42F 栏。560 V DC 来自 AX5000 接入 400 V AC 时的母线定义。",
@@ -136,8 +154,7 @@ const catalog: CatalogMotor[] = [
     }],
     poles: 10,
     busVoltage: 830,
-    currentRms: 120,
-    currentBasis: "液冷连续电流",
+    current: { amps: 120, basis: "液冷连续电流", convention: "rms" },
     resistanceTemperature: 25,
     winding: { phaseResistance: 0.01609, ld: 0.175, lq: 0.180, flux: 0.06411 },
     note: "采用标准三相 UVW 的单相 Ld、Lq 和目录 PM 磁链。同表 Ke 与按该磁链推算的反电动势有差异。830 V DC 为目录峰值功率工况的母线。",
@@ -151,10 +168,14 @@ function toPreset(motor: CatalogMotor): MotorPreset {
   const rsReference = equivalent ? w.lineResistance / 2 : w.phaseResistance;
   const rs =
     rsReference / (1 + copperTemperatureCoefficient * (motor.resistanceTemperature - 20));
-  const psi = equivalent
-    ? Math.sqrt(2 / 3) * w.lineEmfRmsPerKrpm / (motor.poles * Math.PI * 1000 / 30)
-    : w.flux;
-  const imax = motor.currentRms * Math.SQRT2;
+  const psi = "flux" in w
+    ? w.flux
+    : Math.sqrt(2 / 3) * w.lineEmfRmsPerKrpm / (motor.poles * Math.PI * 1000 / 30);
+  const { amps, basis, convention } = motor.current;
+  const imax = convention === "rms" ? amps * Math.SQRT2 : amps;
+  const currentNote = convention === "rms"
+    ? `${basis} ${amps} A RMS 换算为相峰值。`
+    : `${basis} ${amps} A（相峰值）。`;
   const parameters = {
     poles: motor.poles,
     rs: +rs.toPrecision(6),
@@ -178,7 +199,7 @@ function toPreset(motor: CatalogMotor): MotorPreset {
     parameters,
     operation: motor.operation,
     torqueRange,
-    note: `${motor.currentBasis} ${motor.currentRms} A RMS 换算为相峰值。${inductionNote}${motor.note ?? ""}`,
+    note: currentNote + inductionNote + (motor.note ?? ""),
   };
 }
 

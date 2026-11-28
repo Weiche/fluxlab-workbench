@@ -24,6 +24,8 @@ protocol.registerSchemesAsPrivileged([
 const root = path.join(__dirname, "web");
 const catalogHosts = new Set([
   "shop.linmot.com",
+  "anaheimautomation.com",
+  "www.infineon.com",
   "infosys.beckhoff.com",
   "www.kollmorgen.com",
   "emrax.com",

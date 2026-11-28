@@ -42,12 +42,13 @@ V<sub>max</sub> = k<sub>v</sub> V<sub>dc</sub> / √3（SVPWM）或 k<sub>v</sub
 | 型号 | 直流母线 | 初始限流依据 | 电感来源 |
 |---|---:|---|---|
 | LinMot EC02-40/70 | 24 V | 目录额定 1.4 A RMS | 目录等效。 [EC02-40 目录，第 1112–1113 页](https://shop.linmot.com/data/import/Dokumente/0185-1137-E_1V0_DS_Servomotors_EC02-40.pdf) |
+| Anaheim Automation BLY172S-24V-4000 | 24 V | 额定 3.5 A，按 Infineon FOC 相峰值口径 | 目录等效，磁链采用 Infineon 对同型号的辨识值。 [BLY17 规格表](https://anaheimautomation.com/media/anaheim/files/manuals/brushless/L010228_-_BLY17_Series_Spec_Sheet.pdf) · [FOC 培训资料，第 97、109 页](https://www.infineon.com/assets/row/public/documents/30/56/infineon-psoc-control-c3-motor-control-ctw-en.pdf) |
 | Beckhoff AM8121-wFyz | 48 V | 21F 电机栏额定 4 A RMS | 目录等效。 [AM812x 技术数据](https://infosys.beckhoff.com/content/1033/am8100/1333897355.html) |
 | Kollmorgen AKM42G | 320 V | 连续堵转 4.8 A RMS，温升 100 °C | 目录等效。 [AKM Rev F，第 28–29 页](https://www.kollmorgen.com/sites/default/files/2025-04/AKM-KM_SG_000077_RevF_EN.pdf) |
 | Beckhoff AM8042-F | 560 V | 400 V AC 额定工况 3.8 A RMS | 目录等效。 [AM804x 技术数据](https://infosys.beckhoff.com/content/1033/am8000_am8500_ba/8010674955.html) · [AX5000 母线说明](https://infosys.beckhoff.com/content/1033/ax5000_function_doku_hw2/19981666699.html) |
 | EMRAX 228 HV 液冷 | 830 V | 液冷连续 120 A RMS | 目录单相 L<sub>d</sub> / L<sub>q</sub>。 [EMRAX 228 V1.7，第 2 页](https://emrax.com/wp-content/uploads/2026/08/EMRAX_228_datasheet_v1.7.pdf) |
 
-目录等效采用相电阻 R<sub>LL</sub> / 2、L<sub>d</sub> = L<sub>q</sub> = L<sub>LL</sub> / 2，并把线间 RMS 反电动势常数 K<sub>e</sub>（V/krpm）转换成 ψ<sub>f</sub> = √(2/3) K<sub>e</sub> / ω<sub>e,1000 rpm</sub>。所有初始限流都将目录 RMS 电流乘以 √2。25 °C 的电阻按本工具的铜温度系数换算到 20 °C。EMRAX 直接采用 V1.7 列出的 PM 磁链，其同版 K<sub>e</sub> 与按该磁链推算的反电动势有差异。
+目录等效采用相电阻 R<sub>LL</sub> / 2、L<sub>d</sub> = L<sub>q</sub> = L<sub>LL</sub> / 2。线间 RMS 反电动势常数 K<sub>e</sub>（V/krpm）转换成 ψ<sub>f</sub> = √(2/3) K<sub>e</sub> / ω<sub>e,1000 rpm</sub>。采用 RMS 口径时，初始限流为目录电流乘以 √2。25 °C 的电阻按本工具的铜温度系数换算到 20 °C。Anaheim 的目录电阻以 20 °C 为参考录入，磁链取 Infineon 公开的 0.00572 Wb 辨识值。EMRAX 直接采用 V1.7 列出的 PM 磁链，其同版 K<sub>e</sub> 与按该磁链推算的反电动势有差异。
 
 起始工况为便于比较选取的可行示例。转矩–转速包络按电压与电流约束计算，使用时还需参考目录的机械转速、散热和驱动器条件。
 

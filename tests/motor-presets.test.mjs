@@ -8,7 +8,7 @@ const close = (actual, expected, tolerance = 1e-5) =>
   assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} != ${expected}`);
 
 test("catalog motors load a feasible example at each documented DC bus voltage", () => {
-  assert.deepEqual(motorPresets.map((preset) => preset.parameters.vdc), [24, 48, 320, 560, 830]);
+  assert.deepEqual(motorPresets.map((preset) => preset.parameters.vdc), [24, 24, 48, 320, 560, 830]);
   for (const { parameters, operation, name } of motorPresets) {
     const p = { ...defaults, ...parameters };
     const result = solve(p, { ...initial, ...operation });
@@ -16,6 +16,16 @@ test("catalog motors load a feasible example at each documented DC bus voltage",
     close(result.point.torque, operation.torque);
     assert.ok(result.point.current <= p.imax && result.point.voltage <= limit(p), name);
   }
+});
+test("Anaheim keeps the FOC phase-peak current and the independently identified flux", () => {
+  const { parameters, note } = findMotorPreset("anaheim-bly172s-24v-4000");
+  assert.equal(parameters.poles, 4);
+  close(parameters.imax, 3.5);
+  close(parameters.rs, 0.4);
+  close(parameters.ld, 0.6);
+  close(parameters.lq, 0.6);
+  close(parameters.psi, 0.00572);
+  assert.match(note, /3\.5 A（相峰值）/);
 });
 test("catalog conversions retain the line RMS convention and the published separate dq values", () => {
   const low = findMotorPreset("linmot-ec02-40-70");
