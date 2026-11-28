@@ -5,6 +5,7 @@ export interface FluxMap {
   fq: number[][];
 }
 export const pwmMethods = ["SVPWM", "SPWM"] as const;
+export const resistanceMarginLabel = "解析法（预留电阻压降）";
 export interface Parameters {
   poles: number;
   ld: number;
@@ -23,6 +24,7 @@ export interface Parameters {
   imax: number;
   model: "ideal" | "engineering" | "map";
   solver: "analytic" | "numeric";
+  engineeringSolver: "analytic-margin" | "numeric";
   map: FluxMap | null;
 }
 export interface Operation {
@@ -51,6 +53,7 @@ export const defaults: Parameters = {
   imax: 120,
   model: "engineering",
   solver: "analytic",
+  engineeringSolver: "numeric",
   map: null,
 };
 export const initial: Operation = {
@@ -142,6 +145,7 @@ export interface Result {
   point: Point | null;
   status: Status;
   method: string;
+  analyticVoltageLimit?: number | null;
 }
 const eps = 1e-8;
 const feasible = (p: Parameters, x: Point) =>
@@ -593,6 +597,33 @@ export function hasFeasibleCurrent(p: Parameters, rpm: number): boolean {
   return feasible(p, point(p, rpm, d, q)!);
 }
 
+function solveWithResistanceMargin(p: Parameters, o: Operation): Result {
+  const r = resistance(p);
+  const crossTerm = (2 * r * omega(p, o.rpm) * o.torque) / (1.5 * p.poles);
+  // On the target torque curve the voltage cross term is constant.
+  // Bound the remaining resistive term using the current limit.
+  const effectiveSquared = limit(p) ** 2 - (r * p.imax) ** 2 - crossTerm;
+  const analyticVoltageLimit =
+    effectiveSquared >= 0 ? Math.sqrt(effectiveSquared) : null;
+  if (analyticVoltageLimit !== null) {
+    const candidate = analytic(
+      { ...p, useR: false, direct: true, vmax: analyticVoltageLimit },
+      o,
+    );
+    if (candidate) {
+      const x = point(p, o.rpm, candidate.d, candidate.q)!;
+      if (feasible(p, x))
+        return {
+          point: x,
+          status: "ok",
+          method: resistanceMarginLabel,
+          analyticVoltageLimit,
+        };
+    }
+  }
+  return { ...numerical(p, o), method: "数值法（回退）", analyticVoltageLimit };
+}
+
 export function solve(p: Parameters, o: Operation): Result {
   if (o.mode === "manual") {
     const x = point(p, o.rpm, o.id, o.iq);
@@ -602,7 +633,14 @@ export function solve(p: Parameters, o: Operation): Result {
       method: "直接计算",
     };
   }
-  if (!isMaxOutput(o) && p.model === "ideal" && p.solver === "analytic") {
+  if (isMaxOutput(o)) return numerical(p, o);
+  if (
+    p.model === "engineering" &&
+    p.useR &&
+    p.engineeringSolver === "analytic-margin"
+  )
+    return solveWithResistanceMargin(p, o);
+  if (p.model === "ideal" && p.solver === "analytic") {
     const x = analytic(p, o);
     if (x) return { point: x, status: "ok", method: "解析法" };
     const r = numerical(p, o);

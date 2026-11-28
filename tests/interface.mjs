@@ -145,8 +145,34 @@ try {
   assert.ok(await page.locator("#s-vdc").isVisible());
   assert.ok(await page.locator("#s-vmax").isVisible());
   await directLimit.uncheck();
+  const solver = page.getByLabel("求解器", { exact: true });
+  assert.equal(await solver.inputValue(), "numeric");
+  await solver.selectOption("analytic-margin");
+  await wait("method", "解析法（预留电阻压降）");
+  await wait("f-voltage", "解析上限 147.0 V · 实际裕量 14.72 V");
+  const marginProject = await grab("save");
+  const targetTorque = page.locator("#n-torque");
+  await targetTorque.fill("1000");
+  await targetTorque.press("Enter");
+  await wait("method", "数值法（回退）");
+  await wait("status", "目标不可达");
+  await wait("state-note", "已回退完整数值法");
+  await file("open", {
+    name: "resistance-margin.json",
+    mimeType: "application/json",
+    buffer: marginProject,
+  });
+  await wait("method", "解析法（预留电阻压降）");
+  assert.equal(await solver.inputValue(), "analytic-margin");
+  const useResistance = page.getByLabel("计入定子电阻", { exact: true });
+  await useResistance.uncheck();
+  assert.equal(await solver.inputValue(), "numeric");
+  assert.ok(await solver.isDisabled());
+  await useResistance.check();
+  assert.equal(await solver.inputValue(), "analytic-margin");
   await page.locator("#model-choice").selectOption("ideal");
-  await wait("method", "解析法");
+  await page.waitForFunction(() => document.getElementById("method").textContent === "解析法");
+  assert.equal(await solver.inputValue(), "analytic");
   assert.match(await text("values"), /电阻压降.*0.00.*0.00/);
   await by("compare").click();
   await wait("dialog-body", "数值法");
