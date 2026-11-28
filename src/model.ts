@@ -69,9 +69,10 @@ export function limit(p: Parameters) {
   const utilization = p.model !== "ideal" && p.useK ? p.k : 1;
   return (p.vdc * utilization) / divisor;
 }
+export const copperTemperatureCoefficient = 0.00393;
 export const resistance = (p: Parameters) =>
   p.model !== "ideal" && p.useR
-    ? p.rs * (p.useTemp ? 1 + 0.00393 * (p.temperature - 20) : 1)
+    ? p.rs * (p.useTemp ? 1 + copperTemperatureCoefficient * (p.temperature - 20) : 1)
     : 0;
 export const isMaxOutput = (o: Operation) =>
   o.mode === "auto" && o.maxOutput === true;

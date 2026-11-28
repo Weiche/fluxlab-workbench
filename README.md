@@ -16,6 +16,7 @@
 - **求解器对照**在理想自动模式下显示解析与数值结果。点击图右上角可放大。帮助按钮包含坐标约定、方程和图示说明。
 - **工况回放**可直接载入升降速、高速区扫描、正反转或混合工况预设，也可导入 CSV。平滑过渡按每段 0.9 秒对转速、目标转矩或 dq 电流缓入缓出。不同给定方式之间按两端 dq 电流衔接。勾选「保持最大出力」后，每个转速点和过渡途中均按当前约束求最大出力。表中标明源文件行号与错误。导出菜单按当前工作区输出单点或整批 CSV，也可输出当前双图 PNG。
 - **保存项目**生成带版本号的 JSON，包含工况、电机、模型选项、整张磁链图、工况行和回放设置。随项目携带的数据支持离线重开。
+- **电机预设**位于「参数设置 → 电机参数」。按低压和高压选择型号，查看换算值和目录来源，再载入电机、母线、限流与起始工况。载入后仍可微调参数和回放原工况序列，目录来源会随项目保存。
 
 「0 → 最高速 → 0」预设按当前模型及电压、电流约束估算正转上限。未找到有限上限时使用当前横轴范围，界面会提示。开启「循环回放」后，序列会重复播放。平滑模式会衔接末点和首点，两点相同时直接开始下一轮。
 
@@ -36,6 +37,21 @@ V<sub>max</sub> = k<sub>v</sub> V<sub>dc</sub> / √3（SVPWM）或 k<sub>v</sub
 数值搜索未找到目标时检查数据覆盖与区间界限。查表范围、精度预算或搜索结果不足时，界面给出覆盖或未确定状态。可达边界点与原目标分开标记。数值结果的范围和精度依赖磁链图的采样与覆盖。
 
 默认示例取 4 极对、L<sub>d</sub> = 0.45 mH、L<sub>q</sub> = 0.90 mH、ψ<sub>f</sub> = 0.09 Wb、R<sub>s</sub> = 0.045 Ω、260 V 母线及 120 A 限流。在 3000 rpm、48 N·m 下，工作点约为 (−27.0144, 78.3112) A，端电压幅值约为 135.4 V。
+
+### 厂商目录预设
+
+| 型号 | 直流母线 | 初始限流依据 | 电感来源 |
+|---|---:|---|---|
+| LinMot EC02-40/70 | 24 V | 目录额定 1.4 A RMS | 目录等效。 [EC02-40 目录，第 1112–1113 页](https://shop.linmot.com/data/import/Dokumente/0185-1137-E_1V0_DS_Servomotors_EC02-40.pdf) |
+| Anaheim Automation BLY172S-24V-4000 | 24 V | 额定 3.5 A，按 Infineon FOC 相峰值口径 | 目录等效，磁链采用 Infineon 对同型号的辨识值。 [BLY17 规格表](https://anaheimautomation.com/media/anaheim/files/manuals/brushless/L010228_-_BLY17_Series_Spec_Sheet.pdf) · [FOC 培训资料，第 97、109 页](https://www.infineon.com/assets/row/public/documents/30/56/infineon-psoc-control-c3-motor-control-ctw-en.pdf) |
+| Beckhoff AM8121-wFyz | 48 V | 21F 电机栏额定 4 A RMS | 目录等效。 [AM812x 技术数据](https://infosys.beckhoff.com/content/1033/am8100/1333897355.html) |
+| Kollmorgen AKM42G | 320 V | 连续堵转 4.8 A RMS，温升 100 °C | 目录等效。 [AKM Rev F，第 28–29 页](https://www.kollmorgen.com/sites/default/files/2025-04/AKM-KM_SG_000077_RevF_EN.pdf) |
+| Beckhoff AM8042-F | 560 V | 400 V AC 额定工况 3.8 A RMS | 目录等效。 [AM804x 技术数据](https://infosys.beckhoff.com/content/1033/am8000_am8500_ba/8010674955.html) · [AX5000 母线说明](https://infosys.beckhoff.com/content/1033/ax5000_function_doku_hw2/19981666699.html) |
+| EMRAX 228 HV 液冷 | 830 V | 液冷连续 120 A RMS | 目录单相 L<sub>d</sub> / L<sub>q</sub>。 [EMRAX 228 V1.7，第 2 页](https://emrax.com/wp-content/uploads/2026/08/EMRAX_228_datasheet_v1.7.pdf) |
+
+目录等效采用相电阻 R<sub>LL</sub> / 2、L<sub>d</sub> = L<sub>q</sub> = L<sub>LL</sub> / 2。线间 RMS 反电动势常数 K<sub>e</sub>（V/krpm）转换成 ψ<sub>f</sub> = √(2/3) K<sub>e</sub> / ω<sub>e,1000 rpm</sub>。采用 RMS 口径时，初始限流为目录电流乘以 √2。25 °C 的电阻按本工具的铜温度系数换算到 20 °C。Anaheim 的目录电阻以 20 °C 为参考录入，磁链取 Infineon 公开的 0.00572 Wb 辨识值。EMRAX 直接采用 V1.7 列出的 PM 磁链，其同版 K<sub>e</sub> 与按该磁链推算的反电动势有差异。
+
+起始工况为便于比较选取的可行示例。转矩–转速包络按电压与电流约束计算，使用时还需参考目录的机械转速、散热和驱动器条件。
 
 ## CSV 约定
 

@@ -53,6 +53,11 @@ import {
 import batchExample from "../public/examples/operating-points.csv?raw";
 import speedExample from "../public/examples/playback-speeds.csv?raw";
 import mapExample from "../public/examples/flux-map.csv?raw";
+import {
+  motorPresets,
+  findMotorPreset,
+  type MotorPreset,
+} from "./motor-presets.ts";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
   document.getElementById(id)! as T;
@@ -74,6 +79,7 @@ const modelNames = {
 let p: Parameters = { ...defaults },
   o: Operation = { ...initial },
   name = "IPMSM 基准电机",
+  motorPresetId: string | undefined,
   mapName = "",
   rows: Row[] = [],
   rowIndex = -1,
@@ -213,7 +219,7 @@ $("app").innerHTML =
 <div class="plots">${card("current", "电流平面约束分析", "grid", "")}${card("voltage", "电压平面矢量图", "vector", "blue")}</div>
 <section class="card detail-card"><div class="section-head"><span class="icon-tile">${icon("table")}</span><h2>运行点明细</h2><button class="cmp-toggle" data-action="compare" id="compare-btn">求解器对照 ${icon("right", 12)}</button></div><div class="detail-body"><div class="values"><table class="data-table"><thead><tr><th>物理量</th><th>d 轴</th><th>q 轴</th><th>单位</th></tr></thead><tbody id="values"></tbody></table></div><div class="margins"><h3>约束裕量</h3><div id="margins"></div></div></div></section>
 </main></div><footer class="bottom"><span class="live" id="live">实时求解</span><span id="method"></span><span>dq 同步坐标系</span><span class="push">幅值约定 · 相峰值</span><span>FluxLab 1.0</span></footer>
-<dialog id="dialog"><div class="section-head"><h2 id="dialog-title"></h2>${iconButton("close", "关闭", "close")}</div><div class="dialog-inner" id="dialog-body"></div></dialog><input id="file" type="file" hidden><div class="toast" id="toast" role="status" hidden></div>`;
+<dialog id="dialog" aria-labelledby="dialog-title"><div class="section-head"><h2 id="dialog-title"></h2>${iconButton("close", "关闭", "close")}</div><div class="dialog-inner" id="dialog-body"></div></dialog><input id="file" type="file" hidden><div class="toast" id="toast" role="status" hidden></div>`;
 type Key = keyof typeof bounds;
 const unit: Record<Key, string> = {
   rpm: "rpm",
@@ -387,11 +393,19 @@ function sidebar() {
   const mode = o.mode === "auto",
     maxOutput = isMaxOutput(o),
     map = p.model === "map";
+  const preset = findMotorPreset(motorPresetId);
+  const torqueRange = preset?.torqueRange ?? 120;
+  const torqueStep = Math.min(0.5, torqueRange / 100);
+  const currentStep = preset && p.imax < 10 ? 0.01 : 0.5;
+  const limitRange = preset ? Math.ceil(preset.parameters.imax * 2) : 400;
+  const lowCurrent = preset && limitRange <= 20;
   const torqueControl =
     '<div class="operation-torque"><label class="check"><input id="max-output" type="checkbox"' +
     (maxOutput ? " checked" : "") +
     ">最大出力转矩</label>" +
-    (maxOutput ? field("torque", true) : range("torque", -120, 120, 0.5)) +
+    (maxOutput
+      ? field("torque", true)
+      : range("torque", -torqueRange, torqueRange, torqueStep)) +
     "</div>";
   const op =
     '<div class="segmented" aria-label="运行点给定方式"><button data-action="auto" class="' +
@@ -401,8 +415,14 @@ function sidebar() {
     '">手动验点</button></div>' +
     (mode
       ? torqueControl
-      : range("id", -p.imax, p.imax, 0.5) + range("iq", -p.imax, p.imax, 0.5));
+      : range("id", -p.imax, p.imax, currentStep) +
+        range("iq", -p.imax, p.imax, currentStep));
   const motor =
+    '<div class="motor-preset-control"><button class="small-btn" data-action="motor-presets">' +
+    icon("motor", 14) +
+    '电机预设</button>' +
+    (preset ? catalogLink(preset.sources[0], "参考目录") : "") +
+    "</div>" +
     field("poles") +
     (map
       ? '<p class="note">磁链来自导入的 dq 查表数据。</p>'
@@ -428,9 +448,9 @@ function sidebar() {
     "</select></div>";
   const constraint =
     modulation +
-    range("vdc", 1, 800, 1) +
+    range("vdc", 1, preset?.voltageClass === "low" ? 60 : 800, 1) +
     (p.direct ? range("vmax", 1, 600, 1) : "") +
-    range("imax", 1, 400, 1) +
+    range("imax", lowCurrent ? 0.1 : 1, limitRange, lowCurrent ? 0.1 : 1) +
     flag("direct", "直接给定可用电压上限");
   $<HTMLSelectElement>("model-choice").value = p.model;
   const ideal = p.model === "ideal";
@@ -717,7 +737,8 @@ function renderFrame() {
     return;
   }
   graphs();
-  $("m-torque").textContent = f(x?.torque);
+  const torqueDigits = motorPresetId && Math.abs(x?.torque ?? op.torque) < 1 ? 3 : 1;
+  $("m-torque").textContent = f(x?.torque, torqueDigits);
   $("m-current").textContent = f(x?.current);
   $("m-voltage").textContent = f(x?.voltage);
   $("m-speed").textContent = op.rpm.toLocaleString("en-US", {
@@ -731,7 +752,7 @@ function renderFrame() {
   $("f-torque").textContent = maxOutput
     ? "机械转换功率 " + f(power, 2) + " kW"
     : op.mode === "auto"
-      ? "目标 " + f(op.torque, 1) + " N·m"
+      ? "目标 " + f(op.torque, torqueDigits) + " N·m"
       : "由给定电流计算";
   $("f-current").textContent = "极限 " + f(v.imax, 1) + " A";
   const analyticLimit = r.analyticVoltageLimit;
@@ -1017,6 +1038,80 @@ function mapDialog() {
     "载入磁链图",
     '<p>导入规则矩形网格上的总磁链，列名及单位如下。</p><p><code>id_A, iq_A, psi_d_Wb, psi_q_Wb</code></p><p class="note">插值仅在数据覆盖范围内进行。示例数据包含饱和及交叉耦合，用于演示查表流程。</p><div class="map-links"><button class="btn primary" data-action="map-import">选择 CSV</button><button class="btn" data-action="map-sample">载入示例磁链图</button><a class="inline-link" download href="./examples/flux-map.csv">下载示例</a></div>',
   );
+}
+function catalogLink(source: MotorPreset["sources"][number], label = source.label) {
+  return `<a class="inline-link" href="${esc(source.url)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`;
+}
+function showMotorPreset(preset: MotorPreset) {
+  const { parameters: m, operation } = preset;
+  const values = [
+    ["直流母线", m.vdc + " V"],
+    ["限流（相峰值）", m.imax + " A"],
+    ["极对数", String(m.poles)],
+    ["定子电阻（20 °C）", m.rs + " Ω"],
+    ["d / q 轴电感", m.ld + " / " + m.lq + " mH"],
+    ["永磁体磁链", m.psi + " Wb"],
+    ["起始工况", operation.rpm + " rpm · " + operation.torque + " N·m"],
+  ];
+  $("motor-preset-preview").innerHTML =
+    '<dl class="motor-preset-values">' +
+    values
+      .map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`)
+      .join("") +
+    '</dl><p class="note">' +
+    esc(preset.note) +
+    '</p><div class="motor-preset-sources">' +
+    preset.sources.map((source) => catalogLink(source)).join("") +
+    "</div>";
+}
+function motorPresetDialog() {
+  const active = findMotorPreset(motorPresetId) ?? motorPresets[0];
+  const labels = { low: "低压直流母线", high: "高压直流母线" } as const;
+  const options = (["low", "high"] as const)
+    .map((voltage) => {
+      const group = motorPresets
+        .filter((preset) => preset.voltageClass === voltage)
+        .map(
+          (preset) =>
+            `<option value="${preset.id}"${preset === active ? " selected" : ""}>${esc(preset.name)} · ${preset.parameters.vdc} V DC</option>`,
+        )
+        .join("");
+      return `<optgroup label="${labels[voltage]}">${group}</optgroup>`;
+    })
+    .join("");
+  modal(
+    "电机预设",
+    '<div class="field motor-preset-select"><label for="motor-preset-choice">厂商与型号</label><select id="motor-preset-choice" autofocus>' +
+      options +
+      '</select></div><div id="motor-preset-preview"></div>' +
+      '<p class="note">载入会替换电机参数、约束、磁链图与起始工况。已导入的工况序列仍可回放。</p>' +
+      '<div class="map-links"><button class="btn primary" data-action="apply-motor-preset">载入预设</button><button class="btn" data-action="close">取消</button></div>',
+  );
+  showMotorPreset(active);
+}
+$("dialog-body").addEventListener("change", (event) => {
+  const select = event.target as HTMLSelectElement;
+  if (select.id !== "motor-preset-choice") return;
+  const preset = findMotorPreset(select.value);
+  if (preset) showMotorPreset(preset);
+});
+function applyMotorPreset(preset: MotorPreset) {
+  stop();
+  rowIndex = -1;
+  p = {
+    ...defaults,
+    ...preset.parameters,
+    vmax: preset.parameters.vdc / Math.sqrt(3),
+    temperature: 20,
+  };
+  o = { ...initial, ...preset.operation, iq: 0 };
+  name = preset.name;
+  motorPresetId = preset.id;
+  speedRange = undefined;
+  mapName = "";
+  close();
+  sidebar();
+  enqueue(true);
 }
 function showComparison() {
   if (!frame) return;
@@ -1666,6 +1761,7 @@ $("file").addEventListener("change", async () => {
       setReplaySettings(v.replay ?? defaultReplay);
       resetPresetChoice();
       name = v.name;
+      motorPresetId = v.motorPresetId;
       mapName = v.mapName;
       rows = v.rows;
       rowIndex = -1;
@@ -1742,6 +1838,7 @@ async function action(a: string) {
         JSON.stringify({
           version: 1,
           name,
+          motorPresetId,
           p,
           o,
           mapName,
@@ -1761,6 +1858,16 @@ async function action(a: string) {
     case "map-sample":
       loadMap(await sample("flux-map.csv"), "flux-map.csv");
       break;
+    case "motor-presets":
+      motorPresetDialog();
+      break;
+    case "apply-motor-preset": {
+      const preset = findMotorPreset(
+        $<HTMLSelectElement>("motor-preset-choice").value,
+      );
+      if (preset) applyMotorPreset(preset);
+      break;
+    }
     case "prev":
       stop();
       selectRow(rowIndex - 1);
@@ -1823,6 +1930,7 @@ async function action(a: string) {
       o = { ...initial };
       speedRange = undefined;
       name = "IPMSM 基准电机";
+      motorPresetId = undefined;
       mapName = "";
       close();
       sidebar();

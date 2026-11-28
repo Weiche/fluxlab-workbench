@@ -19,6 +19,7 @@ export interface Project {
   o: Operation;
   rows: Row[];
   mapName: string;
+  motorPresetId?: string;
   speedRange?: number;
   replay?: ReplaySettings;
 }
@@ -210,6 +211,9 @@ export function readProject(text: string): Project {
     (!inRange(speedRange, "rpm") || speedRange < 1)
   )
     throw Error("项目横轴范围无效");
+  const motorPresetId = v.motorPresetId;
+  if (motorPresetId !== undefined && typeof motorPresetId !== "string")
+    throw Error("项目电机预设来源无效");
   const replay = v.replay;
   if (
     replay !== undefined &&
@@ -225,6 +229,7 @@ export function readProject(text: string): Project {
     o: v.o,
     rows: v.rows,
     mapName: v.mapName,
+    motorPresetId,
     speedRange,
     replay,
   };

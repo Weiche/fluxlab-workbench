@@ -5,6 +5,7 @@ const {
   protocol,
   net,
   session,
+  shell,
 } = require("electron");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
@@ -21,6 +22,14 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 const root = path.join(__dirname, "web");
+const catalogHosts = new Set([
+  "shop.linmot.com",
+  "anaheimautomation.com",
+  "www.infineon.com",
+  "infosys.beckhoff.com",
+  "www.kollmorgen.com",
+  "emrax.com",
+]);
 const csp =
   "default-src 'self'; script-src 'self' blob:; worker-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' blob:; object-src 'none'; base-uri 'none'";
 app.whenReady().then(() => {
@@ -63,7 +72,12 @@ app.whenReady().then(() => {
       sandbox: true,
     },
   });
-  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    const target = new URL(url);
+    if (target.protocol === "https:" && catalogHosts.has(target.host))
+      shell.openExternal(url).catch((error) => console.error(error));
+    return { action: "deny" };
+  });
   win.webContents.on("will-navigate", (e, url) => {
     if (!url.startsWith("fluxlab://app/")) e.preventDefault();
   });

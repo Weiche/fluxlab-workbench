@@ -329,6 +329,44 @@ input[type="range"]::-webkit-slider-thumb {
 .file-name {
   overflow-wrap: anywhere;
 }
+.motor-preset-control,
+.motor-preset-sources {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+.motor-preset-control {
+  margin-bottom: 9px;
+}
+.motor-preset-select {
+  flex-wrap: wrap;
+}
+.motor-preset-select select {
+  max-width: 100%;
+}
+.motor-preset-values {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 135px), 1fr));
+  gap: 1px;
+  overflow: hidden;
+  margin: 12px 0 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--line);
+}
+.motor-preset-values > div {
+  padding: 7px 10px;
+  background: #f8fafb;
+}
+.motor-preset-values dt {
+  color: #526a79;
+  font-size: 11px;
+}
+.motor-preset-values dd {
+  margin: 0;
+  font-family: var(--mono);
+}
 .inline-link {
   color: var(--teal);
   font-size: 12px;

@@ -142,12 +142,12 @@ export function drawSpeedChart(
     bottom = height - 25;
   const samples = envelope?.samples ?? [];
   const limitTorque = Math.max(
-    1,
+    0,
     showNegative ? Math.abs(torque ?? 0) : (torque ?? 0),
     ...samples.map(({ upper, lower }) =>
       showNegative ? Math.max(upper ?? 0, -(lower ?? 0)) : (upper ?? 0),
     ),
-  );
+  ) || 1;
   const tickCount = showNegative ? 2 : 4;
   const precision = 10 ** Math.floor(Math.log10(limitTorque / tickCount));
   const torqueStep =
